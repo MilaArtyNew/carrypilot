@@ -1,0 +1,32 @@
+bot:
+  position_margin_usd: 5
+  leverage: 5
+  scan_interval_seconds: 30
+  approve_timeout_seconds: 300
+
+filters:
+  min_funding_spread: 0.0003      # 0.03%
+  min_net_profit: 0.00015         # 0.015%
+  min_minutes_to_funding: 15
+  max_bid_ask_spread: 0.0005      # 0.05%
+  max_price_deviation_pct: 0.5    # max % price moved before re-check cancels
+
+exchanges:
+  kraken:
+    enabled: true
+    mode: trade                   # trade | monitor
+    base_url: https://futures.kraken.com
+  nado:
+    enabled: true
+    mode: trade
+    base_url: https://app.nado.xyz
+  zero_one:
+    enabled: true
+    mode: trade
+  variational:
+    enabled: true
+    mode: monitor                 # read-only, no trading API yet
+
+symbols:
+  # Filled dynamically from exchange intersection scan
+  watch: []

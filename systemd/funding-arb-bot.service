@@ -1,0 +1,15 @@
+[Unit]
+Description=Funding Arbitrage Bot
+After=network.target
+
+[Service]
+Type=simple
+User=gpt
+WorkingDirectory=/home/gpt/funding-arb-bot
+ExecStart=/home/gpt/funding-arb-bot/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+EnvironmentFile=/home/gpt/funding-arb-bot/.env
+
+[Install]
+WantedBy=multi-user.target

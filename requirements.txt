@@ -1,0 +1,6 @@
+aiohttp>=3.9
+python-telegram-bot>=21.0
+python-dotenv>=1.0
+nado-protocol>=0.1.0
+# 01.xyz SDK: check docs.01.xyz for package name, add here
+# python-kraken-sdk>=2.0  # optional — we use raw aiohttp for futures
