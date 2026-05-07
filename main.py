@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from dotenv import load_dotenv
 
-from exchanges import KrakenExchange, NadoExchange, ZeroOneExchange, VariationalExchange
+from exchanges import ExtendedExchange, NadoExchange, ZeroOneExchange, VariationalExchange
 from core.scanner import OpportunityScanner
 from core.executor import TradeExecutor
 from core.position_tracker import PositionTracker
@@ -23,13 +23,14 @@ log = get_logger("main")
 def build_exchanges() -> dict:
     exchanges = {}
 
-    kraken_key = os.getenv("KRAKEN_API_KEY")
-    kraken_secret = os.getenv("KRAKEN_API_SECRET")
-    if kraken_key and kraken_secret:
-        exchanges["kraken"] = KrakenExchange(kraken_key, kraken_secret)
-        log.info("Kraken: configured")
+    ext_key = os.getenv("EXTENDED_API_KEY")
+    ext_priv = os.getenv("EXTENDED_PRIVATE_KEY")
+    ext_pub = os.getenv("EXTENDED_PUBLIC_KEY")
+    if ext_key and ext_priv and ext_pub:
+        exchanges["extended"] = ExtendedExchange(ext_key, ext_priv, ext_pub)
+        log.info("Extended: configured")
     else:
-        log.warning("Kraken: API keys missing, skipping")
+        log.warning("Extended: API keys missing, skipping")
 
     nado_key = os.getenv("NADO_PRIVATE_KEY")
     nado_wallet = os.getenv("NADO_WALLET_ADDRESS")
