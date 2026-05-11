@@ -66,6 +66,8 @@ class FundingMonitor:
                     key = f"{opp.symbol}:{opp.short_exchange}:{opp.long_exchange}"
                     if key not in self._seen:
                         self._seen.add(key)
+                        if self.tracker.get(opp.symbol):
+                            continue  # already have an open position for this symbol
                         log.info(f"New opportunity: {opp.symbol} spread={opp.spread:.4%} net={opp.net_profit:.4%}")
                         await self.on_opportunity(opp)
                 valid_keys = {f"{o.symbol}:{o.short_exchange}:{o.long_exchange}" for o in opps}
