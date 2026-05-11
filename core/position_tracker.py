@@ -115,8 +115,14 @@ class PositionTracker:
                     await ex._ensure_symbol_map()
                     check_syms = list(ex._product_map.keys()) if hasattr(ex, "_product_map") else []
                 else:
-                    from exchanges.kraken import SYMBOL_MAP as KRAKEN_MAP
-                    check_syms = list(KRAKEN_MAP.keys())
+                    import sys
+                    ex_module = sys.modules.get(type(ex).__module__)
+                    ex_map = getattr(ex_module, "SYMBOL_MAP", None)
+                    if ex_map:
+                        check_syms = list(ex_map.keys())
+                    else:
+                        from exchanges.kraken import SYMBOL_MAP as KRAKEN_MAP
+                        check_syms = list(KRAKEN_MAP.keys())
                 for sym in check_syms:
                     try:
                         pos = await ex.get_position(sym)

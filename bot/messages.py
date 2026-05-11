@@ -1,3 +1,4 @@
+import html
 from decimal import Decimal
 from core.scanner import Opportunity
 from core.position_tracker import PairState
@@ -72,7 +73,7 @@ def format_trade_result(result, action: str = "открыта", paper: bool = Fa
         return text
     return (
         f"❌ {paper_tag}<b>Ошибка {action} {result.symbol}</b>\n"
-        f"{result.error or 'Unknown error'}"
+        f"{html.escape(str(result.error or 'Unknown error'))}"
     )
 
 

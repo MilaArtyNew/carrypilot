@@ -27,7 +27,7 @@ from utils import get_logger
 log = get_logger("telegram")
 
 SIGNAL_COOLDOWN_SEC = 300       # 5 min between signals for the same symbol
-MAX_POSITIONS_PER_EXCHANGE = 2  # max simultaneous legs on one exchange
+MAX_POSITIONS_PER_EXCHANGE = 3  # max simultaneous legs on one exchange
 _IL_TZ = ZoneInfo("Asia/Jerusalem")
 TRADING_HOUR_START = 8   # 08:00 Israel
 TRADING_HOUR_END   = 19  # 19:00 Israel
@@ -260,7 +260,7 @@ class TelegramBot:
 
             ba_short = bid_ask_spread(short_fr.bid, short_fr.ask)
             ba_long = bid_ask_spread(long_fr.bid, long_fr.ask)
-            if ba_short > Decimal("0.0005") or ba_long > Decimal("0.0005"):
+            if ba_short > self.scanner.max_ba_spread or ba_long > self.scanner.max_ba_spread:
                 return False, "Bid/ask спред слишком широкий"
 
             mins = minutes_to_funding(short_fr.next_funding_ts)

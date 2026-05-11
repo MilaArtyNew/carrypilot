@@ -10,7 +10,7 @@ log = get_logger("scanner")
 
 # Default taker fees per exchange (fraction, e.g. 0.0005 = 0.05%)
 DEFAULT_FEES = {
-    "kraken": Decimal("0.0005"),
+    "extended": Decimal("0.0005"),
     "nado": Decimal("0.0004"),
     "01": Decimal("0.0005"),
     "variational": Decimal("0.0004"),

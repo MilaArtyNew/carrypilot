@@ -140,16 +140,21 @@ class TradeExecutor:
 
         # Use max price so both legs get equal token qty and neither side exceeds notional
         max_price = max(opp.short_price, opp.long_price)
-        step_short = await short_ex.get_qty_step(opp.symbol)
-        step_long = await long_ex.get_qty_step(opp.symbol)
+        step_short, step_long, min_short, min_long = await asyncio.gather(
+            short_ex.get_qty_step(opp.symbol),
+            long_ex.get_qty_step(opp.symbol),
+            short_ex.get_min_qty(opp.symbol),
+            long_ex.get_min_qty(opp.symbol),
+        )
         qty = calc_qty(self.margin_usd, self.leverage, max_price, max(step_short, step_long))
+        required_min = max(min_short, min_long)
 
-        if qty <= 0:
+        if qty <= 0 or (required_min > 0 and qty < required_min):
             return TradeResult(
                 success=False, symbol=opp.symbol,
                 short_exchange=opp.short_exchange, long_exchange=opp.long_exchange,
                 short_order=None, long_order=None, qty=qty,
-                error="Calculated qty is zero — check margin and price",
+                error=f"qty {qty} < min_qty {required_min} for {opp.symbol} — increase margin",
             )
 
         log.info(f"Opening {opp.symbol}: SHORT {opp.short_exchange} / LONG {opp.long_exchange} | qty={qty}")
@@ -180,7 +185,7 @@ class TradeExecutor:
                 short_order=short_result, long_order=long_result, qty=qty,
             )
 
-        log.error(f"EMERGENCY: {opp.symbol} one leg failed. short_ok={short_ok} long_ok={long_ok}")
+        log.error(f"EMERGENCY: {opp.symbol} one leg failed. short_ok={short_ok} long_ok={long_ok} | short_err={short_result.error} | long_err={long_result.error}")
         await self._emergency_close(opp.symbol, short_ex, long_ex, short_ok, long_ok)
 
         error = []

@@ -146,6 +146,7 @@ class ExtendedExchange(ExchangeBase):
                 "synthetic_resolution": int(l2["syntheticResolution"]),
                 "qty_step": Decimal(str(tc.get("minOrderSizeChange", "1"))),
                 "min_qty": Decimal(str(tc.get("minOrderSize", "1"))),
+                "price_step": Decimal(str(tc.get("minPriceChange", "0.00001"))),
             }
 
     # ─── Order signing ───────────────────────────────────────────────────────
@@ -178,13 +179,11 @@ class ExtendedExchange(ExchangeBase):
         syn_amount = int(
             (qty * synthetic_resolution).quantize(Decimal("1"), rounding=round_syn)
         )
-        col_amount = int(
-            (qty * price * COLLATERAL_RESOLUTION).quantize(Decimal("1"), rounding=round_col)
-        )
-        # +1 to fee so it never rounds to zero for tiny orders
+        # col_amount must be computed exactly as the server does: floor(qty * price * resolution)
+        col_amount = int(qty * price * COLLATERAL_RESOLUTION)
         fee_amount = int(
-            (qty * price * COLLATERAL_RESOLUTION * TAKER_FEE).quantize(Decimal("1"), rounding=ROUND_UP)
-        ) + 1
+            (col_amount * TAKER_FEE).quantize(Decimal("1"), rounding=ROUND_UP)
+        )
 
         base_amount = syn_amount if is_buy else -syn_amount
         quote_amount = -col_amount if is_buy else col_amount
@@ -271,6 +270,11 @@ class ExtendedExchange(ExchangeBase):
         m = self._market_cache.get(symbol)
         return m["qty_step"] if m else Decimal("1")
 
+    async def get_min_qty(self, symbol: str) -> Decimal:
+        await self._ensure_market_cache()
+        m = self._market_cache.get(symbol)
+        return m["min_qty"] if m else Decimal("1")
+
     async def get_position(self, symbol: str) -> Optional[Position]:
         data = await self._get("/user/positions")
         ext_sym = SYMBOL_MAP.get(symbol)
@@ -315,14 +319,15 @@ class ExtendedExchange(ExchangeBase):
                 error=f"qty {qty} < min_qty {m['min_qty']} for {symbol}",
             )
 
-        # Mark price with slippage for signing (worst-case price bound)
+        # Mark price with slippage, rounded to price_step (must match what server expects)
         fr = await self.get_funding_rate(symbol)
         mark = fr.mark_price
         ext_side = "BUY" if side == "buy" else "SELL"
+        price_step = m.get("price_step", Decimal("0.00001"))
         if ext_side == "BUY":
-            sign_price = mark * (1 + MARKET_SLIPPAGE)
+            sign_price = (mark * (1 + MARKET_SLIPPAGE)).quantize(price_step, rounding=ROUND_UP)
         else:
-            sign_price = mark * (1 - MARKET_SLIPPAGE)
+            sign_price = (mark * (1 - MARKET_SLIPPAGE)).quantize(price_step, rounding=ROUND_DOWN)
 
         try:
             sig = self._sign_order(
@@ -346,7 +351,7 @@ class ExtendedExchange(ExchangeBase):
             "type": "MARKET",
             "side": ext_side,
             "qty": str(qty),
-            "price": str(sign_price.quantize(Decimal("0.00001"))),
+            "price": str(sign_price),
             "postOnly": False,
             "timeInForce": "IOC",
             "expiryEpochMillis": sig["expiry_ms"],

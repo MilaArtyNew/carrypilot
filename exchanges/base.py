@@ -77,6 +77,10 @@ class ExchangeBase(ABC):
     async def get_qty_step(self, symbol: str) -> Decimal:
         """Minimum qty increment for symbol."""
 
+    async def get_min_qty(self, symbol: str) -> Decimal:
+        """Minimum order size for symbol. Override if exchange enforces it."""
+        return Decimal(0)
+
     @abstractmethod
     async def place_market_order(
         self, symbol: str, side: str, qty: Decimal
