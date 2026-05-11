@@ -132,6 +132,12 @@ async def main():
             log.info(f"Restored paper position: {trade.symbol} ({trade.short_exchange}/{trade.long_exchange})")
     else:
         await tracker.restore_from_exchanges()
+        if live_ledger:
+            position_times = live_ledger.get_all_position_times()
+            for pair in tracker.get_all():
+                if pair.symbol in position_times:
+                    pair.opened_at = position_times[pair.symbol]
+                    log.info(f"Restored open time for {pair.symbol}: {pair.opened_at:.0f}")
 
     log.info("Starting funding arb bot...")
     async with app:

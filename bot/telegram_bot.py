@@ -146,6 +146,7 @@ class TelegramBot:
                 long_close=result.long_order.price,
                 reason=reason,
             )
+            self.live_ledger.note_close(symbol)
 
         if result.success:
             self.tracker.remove_pair(symbol)
@@ -245,6 +246,7 @@ class TelegramBot:
                     long_entry=long_entry,
                     spread=opp.spread,
                 )
+                self.live_ledger.note_open(opp.symbol, time.time())
             await self.send(format_trade_result(result, paper=self.paper_mode))
         else:
             short_ok = result.short_order and result.short_order.status == "filled"
@@ -323,6 +325,7 @@ class TelegramBot:
                 long_close=result.long_order.price,
                 reason="manual",
             )
+            self.live_ledger.note_close(symbol)
 
         if result.success:
             self.tracker.remove_pair(symbol)
@@ -425,6 +428,15 @@ class TelegramBot:
             if result.success:
                 self.tracker.remove_pair(pair.symbol)
                 self._signal_sent_at[pair.symbol] = time.time()
+                if self.live_ledger:
+                    if result.short_order and result.long_order:
+                        self.live_ledger.record_close(
+                            symbol=pair.symbol,
+                            short_close=result.short_order.price,
+                            long_close=result.long_order.price,
+                            reason="closeall",
+                        )
+                    self.live_ledger.note_close(pair.symbol)
                 lines.append(f"✅ {pair.symbol} закрыт")
             else:
                 lines.append(f"❌ {pair.symbol}: {result.error or 'ошибка'}")

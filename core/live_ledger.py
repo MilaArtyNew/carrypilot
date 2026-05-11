@@ -16,6 +16,7 @@ from utils import get_logger
 log = get_logger("live_ledger")
 
 DEFAULT_PATH = Path("/data/live_trades.json")
+POSITION_TIMES_PATH = Path("/data/position_times.json")
 FUNDING_INTERVAL_HOURS = Decimal("8")
 
 
@@ -164,3 +165,36 @@ class LiveLedger:
     def recent_closed(self, n: int = 10) -> list[LiveTrade]:
         closed = [t for t in self._trades.values() if t.status == "closed"]
         return sorted(closed, key=lambda t: t.closed_at or "", reverse=True)[:n]
+
+    # ── Position open-time persistence ────────────────────────────────────────
+
+    def note_open(self, symbol: str, opened_at: float):
+        """Save real open timestamp for a position so it survives restarts."""
+        times = self._load_position_times()
+        times[symbol] = opened_at
+        self._save_position_times(times)
+
+    def note_close(self, symbol: str):
+        """Remove position from open-time store on close."""
+        times = self._load_position_times()
+        times.pop(symbol, None)
+        self._save_position_times(times)
+
+    def get_all_position_times(self) -> dict[str, float]:
+        """Returns {symbol: opened_at unix timestamp} for all tracked open positions."""
+        return self._load_position_times()
+
+    def _load_position_times(self) -> dict[str, float]:
+        try:
+            if POSITION_TIMES_PATH.exists():
+                return json.loads(POSITION_TIMES_PATH.read_text())
+        except Exception as e:
+            log.warning(f"Could not load position times: {e}")
+        return {}
+
+    def _save_position_times(self, times: dict[str, float]):
+        try:
+            POSITION_TIMES_PATH.parent.mkdir(parents=True, exist_ok=True)
+            POSITION_TIMES_PATH.write_text(json.dumps(times, indent=2))
+        except Exception as e:
+            log.error(f"Failed to save position times: {e}")
