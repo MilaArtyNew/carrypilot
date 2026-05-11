@@ -2,6 +2,7 @@
 Telegram bot: сигналы, approve, команды управления.
 """
 import asyncio
+import time
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
