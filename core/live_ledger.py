@@ -11,10 +11,14 @@ from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from utils import get_logger
 
 log = get_logger("live_ledger")
+
+_IL_TZ = ZoneInfo("Asia/Jerusalem")
+_TS_FMT = "%Y-%m-%d %H:%M:%S %Z"
 
 _DATA_DIR = Path(os.getenv("DATA_DIR", "/home/gpt/funding-arb-bot/data"))
 DEFAULT_PATH = _DATA_DIR / "live_trades.json"
@@ -90,7 +94,7 @@ class LiveLedger:
             short_entry=str(short_entry),
             long_entry=str(long_entry),
             spread_at_open=str(spread),
-            opened_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            opened_at=datetime.now(_IL_TZ).strftime(_TS_FMT),
             status="open",
         )
         self._trades[trade_id] = trade
@@ -124,7 +128,7 @@ class LiveLedger:
         total_pnl = price_pnl + funding_pnl
 
         trade.status = "closed"
-        trade.closed_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        trade.closed_at = datetime.now(_IL_TZ).strftime(_TS_FMT)
         trade.short_close = str(short_close)
         trade.long_close = str(long_close)
         trade.price_pnl = str(round(price_pnl, 6))
@@ -141,10 +145,18 @@ class LiveLedger:
     @staticmethod
     def _hours_since(opened_at_str: str) -> float:
         try:
-            opened = datetime.strptime(opened_at_str, "%Y-%m-%d %H:%M:%S UTC").replace(tzinfo=timezone.utc)
-            return (datetime.now(timezone.utc) - opened).total_seconds() / 3600
+            # Try aware parse first (new format with IDT/IST/UTC suffix)
+            for fmt in ("%Y-%m-%d %H:%M:%S %Z", "%Y-%m-%d %H:%M:%S UTC"):
+                try:
+                    opened = datetime.strptime(opened_at_str, fmt)
+                    if opened.tzinfo is None:
+                        opened = opened.replace(tzinfo=timezone.utc)
+                    return (datetime.now(timezone.utc) - opened).total_seconds() / 3600
+                except ValueError:
+                    continue
         except Exception:
-            return 0.0
+            pass
+        return 0.0
 
     def stats(self) -> dict:
         closed = [t for t in self._trades.values() if t.status == "closed" and t.realized_pnl]
