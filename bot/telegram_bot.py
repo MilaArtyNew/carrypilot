@@ -164,7 +164,10 @@ class TelegramBot:
 
     async def _callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        try:
+            await query.answer()
+        except Exception:
+            pass  # query may have expired; continue anyway
         data = query.data
 
         if data.startswith("approve:"):
@@ -219,7 +222,10 @@ class TelegramBot:
                 await query.edit_message_text("❌ Сделка устарела — жди новый сигнал.")
                 return
 
-        await query.edit_message_text("🔄 Повторная проверка условий...")
+        try:
+            await query.edit_message_text("🔄 Повторная проверка условий...")
+        except Exception:
+            pass
 
         valid, reason = await self._recheck(opp)
         if not valid:
