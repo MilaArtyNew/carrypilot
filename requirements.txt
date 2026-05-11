@@ -3,3 +3,6 @@ python-telegram-bot>=21.0
 python-dotenv>=1.0
 nado-protocol>=0.1.0
 fast-stark-crypto==0.5.0
+base58>=2.1
+cryptography>=3.4
+protobuf>=4.0
