@@ -17,9 +17,10 @@ from core.scanner import Opportunity
 from core.executor import TradeExecutor, TradeResult
 from core.position_tracker import PositionTracker, PairState
 from core.scanner import OpportunityScanner
+from core.live_ledger import LiveLedger
 from bot.messages import (
     format_opportunity, format_position, format_trade_result,
-    format_emergency, format_paper_log, format_paper_stats,
+    format_emergency, format_paper_log, format_paper_stats, format_live_stats,
 )
 from exchanges.base import ExchangeBase
 from utils import get_logger
@@ -49,6 +50,7 @@ class TelegramBot:
         margin_usd: Decimal,
         leverage: int,
         paper_mode: bool = False,
+        live_ledger: Optional[LiveLedger] = None,
     ):
         self.token = token
         self.chat_id = chat_id
@@ -59,6 +61,7 @@ class TelegramBot:
         self.margin_usd = margin_usd
         self.leverage = leverage
         self.paper_mode = paper_mode
+        self.live_ledger = live_ledger
         self._paused = False
         self._disabled_exchanges: set[str] = set()
         self._pending: dict[str, Opportunity] = {}
@@ -136,6 +139,13 @@ class TelegramBot:
             recent = [t for t in self.executor.paper_ledger.get_all_closed() if t.symbol == symbol and t.realized_pnl]
             if recent:
                 closed_trade = recent[-1]
+        if result.success and self.live_ledger and result.short_order and result.long_order:
+            closed_trade = self.live_ledger.record_close(
+                symbol=symbol,
+                short_close=result.short_order.price,
+                long_close=result.long_order.price,
+                reason=reason,
+            )
 
         if result.success:
             self.tracker.remove_pair(symbol)
@@ -225,6 +235,16 @@ class TelegramBot:
                 short_entry=short_entry,
                 long_entry=long_entry,
             ))
+            if self.live_ledger:
+                self.live_ledger.record_open(
+                    symbol=opp.symbol,
+                    short_exchange=opp.short_exchange,
+                    long_exchange=opp.long_exchange,
+                    qty=result.qty,
+                    short_entry=short_entry,
+                    long_entry=long_entry,
+                    spread=opp.spread,
+                )
             await self.send(format_trade_result(result, paper=self.paper_mode))
         else:
             short_ok = result.short_order and result.short_order.status == "filled"
@@ -296,6 +316,13 @@ class TelegramBot:
             ]
             if recent:
                 closed_trade = recent[-1]
+        if result.success and self.live_ledger and result.short_order and result.long_order:
+            closed_trade = self.live_ledger.record_close(
+                symbol=symbol,
+                short_close=result.short_order.price,
+                long_close=result.long_order.price,
+                reason="manual",
+            )
 
         if result.success:
             self.tracker.remove_pair(symbol)
@@ -375,11 +402,15 @@ class TelegramBot:
         await update.message.reply_html(format_paper_log(trades))
 
     async def cmd_stats(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self.paper_mode or not self.executor.paper_ledger:
-            await update.message.reply_text("Статистика доступна только в paper mode.")
-            return
-        stats = self.executor.paper_ledger.stats()
-        await update.message.reply_html(format_paper_stats(stats))
+        if self.paper_mode and self.executor.paper_ledger:
+            stats = self.executor.paper_ledger.stats()
+            await update.message.reply_html(format_paper_stats(stats))
+        elif self.live_ledger:
+            stats = self.live_ledger.stats()
+            recent = self.live_ledger.recent_closed(10)
+            await update.message.reply_html(format_live_stats(stats, recent))
+        else:
+            await update.message.reply_text("Статистика недоступна.")
 
     async def _handle_closeall(self, query):
         import time

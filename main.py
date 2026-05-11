@@ -13,6 +13,7 @@ from core.executor import TradeExecutor
 from core.position_tracker import PositionTracker
 from core.monitor import FundingMonitor
 from core.paper_ledger import PaperLedger
+from core.live_ledger import LiveLedger
 from bot.telegram_bot import TelegramBot
 from utils import get_logger
 
@@ -61,6 +62,7 @@ async def main():
 
     paper_mode = os.getenv("PAPER_TRADING", "false").lower() == "true"
     paper_ledger = PaperLedger() if paper_mode else None
+    live_ledger = None if paper_mode else LiveLedger()
     if paper_mode:
         log.info("*** PAPER TRADING MODE — no real orders will be placed ***")
 
@@ -100,6 +102,7 @@ async def main():
         margin_usd=margin,
         leverage=leverage,
         paper_mode=paper_mode,
+        live_ledger=live_ledger,
     )
     app = tg_bot.build()
 

@@ -120,6 +120,36 @@ def format_paper_stats(stats: dict) -> str:
     )
 
 
+def format_live_stats(stats: dict, recent: list) -> str:
+    pnl = stats["total_pnl"]
+    sign = "+" if pnl >= 0 else ""
+    price_pnl = stats.get("total_price_pnl", Decimal(0))
+    funding_pnl = stats.get("total_funding_pnl", Decimal(0))
+    p_sign = "+" if price_pnl >= 0 else ""
+    lines = [
+        f"<b>📊 Live статистика:</b>\n",
+        f"Открытых позиций: {stats['open']}",
+        f"Закрытых сделок: {stats['closed']}",
+        f"Wins / Losses: {stats['wins']} / {stats['losses']}",
+        f"Win rate: {stats['win_rate']}\n",
+        f"Итого P&L: <b>{sign}{pnl:.4f} USD</b>",
+        f"  ├ Ценовой delta: {p_sign}{price_pnl:.4f} USD",
+        f"  └ Funding (оценка): +{funding_pnl:.4f} USD",
+    ]
+    if recent:
+        lines.append("\n<b>Последние сделки:</b>")
+        for t in recent:
+            pnl_t = Decimal(t.realized_pnl) if t.realized_pnl else None
+            pnl_str = f"{'+' if pnl_t and pnl_t >= 0 else ''}{pnl_t:.4f}$" if pnl_t is not None else "—"
+            reason = f" [{t.close_reason}]" if t.close_reason else ""
+            lines.append(
+                f"<b>{t.symbol}</b> {t.short_exchange}↓/{t.long_exchange}↑ "
+                f"PnL: {pnl_str}{reason}\n"
+                f"  {t.opened_at} → {t.closed_at or '—'}"
+            )
+    return "\n".join(lines)
+
+
 def format_emergency(symbol: str, short_ex: str, long_ex: str, short_ok: bool, long_ok: bool) -> str:
     return (
         f"🚨 <b>ОШИБКА: одна нога не открылась</b>\n\n"
