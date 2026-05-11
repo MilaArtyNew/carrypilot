@@ -55,12 +55,6 @@ def build_exchanges() -> dict:
 
 
 async def main():
-    try:
-        import urllib.request
-        outbound_ip = urllib.request.urlopen("https://ifconfig.me", timeout=5).read().decode()
-        log.info(f"Outbound IP: {outbound_ip}")
-    except Exception:
-        pass
     exchanges = build_exchanges()
     if len([e for e in exchanges.values() if not e.read_only]) < 2:
         log.error("Need at least 2 trading exchanges. Check your .env keys.")
