@@ -6,8 +6,8 @@ After=network.target
 Type=simple
 User=gpt
 WorkingDirectory=/home/gpt/funding-arb-bot
-ExecStart=/home/gpt/funding-arb-bot/.venv/bin/python main.py
-Restart=on-failure
+ExecStart=/usr/bin/python3 main.py
+Restart=always
 RestartSec=10
 EnvironmentFile=/home/gpt/funding-arb-bot/.env
 

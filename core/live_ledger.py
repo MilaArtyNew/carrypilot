@@ -4,6 +4,7 @@ PnL = price delta (short_entry-short_close + long_close-long_entry)
     + estimated funding (spread × notional × funding_events).
 """
 import json
+import os
 import time
 from dataclasses import dataclass, asdict
 from decimal import Decimal
@@ -15,8 +16,9 @@ from utils import get_logger
 
 log = get_logger("live_ledger")
 
-DEFAULT_PATH = Path("/data/live_trades.json")
-POSITION_TIMES_PATH = Path("/data/position_times.json")
+_DATA_DIR = Path(os.getenv("DATA_DIR", "/home/gpt/funding-arb-bot/data"))
+DEFAULT_PATH = _DATA_DIR / "live_trades.json"
+POSITION_TIMES_PATH = _DATA_DIR / "position_times.json"
 FUNDING_INTERVAL_HOURS = Decimal("8")
 
 
