@@ -148,9 +148,16 @@ class TelegramBot:
             )
             self.live_ledger.note_close(symbol)
 
-        if result.success:
+        already_gone = (
+            not result.success
+            and result.error
+            and "No open position" in result.error
+        )
+        if result.success or already_gone:
             self.tracker.remove_pair(symbol)
             self._signal_sent_at[symbol] = time.time()  # cooldown after close
+            if already_gone and self.live_ledger:
+                self.live_ledger.note_close(symbol)
         await self.send(format_trade_result(result, action="закрыта (авто)", paper=self.paper_mode, trade=closed_trade))
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
@@ -327,9 +334,16 @@ class TelegramBot:
             )
             self.live_ledger.note_close(symbol)
 
-        if result.success:
+        already_gone = (
+            not result.success
+            and result.error
+            and "No open position" in result.error
+        )
+        if result.success or already_gone:
             self.tracker.remove_pair(symbol)
             self._signal_sent_at[symbol] = time.time()  # cooldown after close
+            if already_gone and self.live_ledger:
+                self.live_ledger.note_close(symbol)
         await self.send(format_trade_result(result, action="закрыта", paper=self.paper_mode, trade=closed_trade))
 
     # ── Commands ──────────────────────────────────────────────────────────────
