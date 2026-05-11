@@ -369,6 +369,7 @@ class TelegramBot:
     async def cmd_opportunities(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔍 Сканирую...")
         opps = await self.scanner.scan()
+        opps = [o for o in opps if not self.tracker.get(o.symbol)]
         if not opps:
             await update.message.reply_text("Подходящих связок не найдено.")
             return
