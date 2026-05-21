@@ -1,5 +1,5 @@
 """
-Telegram bot: сигналы, approve, команды управления.
+Telegram bot: signals, approvals, and management commands.
 """
 import asyncio
 import time
@@ -132,7 +132,7 @@ class TelegramBot:
         pair = self.tracker.get(symbol)
         if not pair:
             return
-        await self.send(f"⚙️ <b>Автозакрытие {symbol}</b>\n{reason}")
+        await self.send(f"⚙️ <b>Auto-close {symbol}</b>\n{reason}")
         result = await self.executor.close_pair(symbol, pair.short_exchange, pair.long_exchange)
 
         closed_trade = None
@@ -159,7 +159,7 @@ class TelegramBot:
             self._signal_sent_at[symbol] = time.time()  # cooldown after close
             if already_gone and self.live_ledger:
                 self.live_ledger.note_close(symbol)
-        await self.send(format_trade_result(result, action="закрыта (авто)", paper=self.paper_mode, trade=closed_trade))
+        await self.send(format_trade_result(result, action="closed (auto)", paper=self.paper_mode, trade=closed_trade))
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
@@ -175,14 +175,14 @@ class TelegramBot:
             await self._handle_approve(data[8:], query)
         elif data.startswith("skip:"):
             self._pending.pop(data[5:], None)
-            await query.edit_message_text("⏭ Пропущено.")
+            await query.edit_message_text("⏭ Skipped.")
         elif data.startswith("details:"):
             opp = self._pending.get(data[8:])
             if opp:
                 await query.edit_message_text(
-                    f"Балансы:\nSHORT ({opp.short_exchange}): ${opp.short_balance:.2f}\n"
+                    f"Balances:\nSHORT ({opp.short_exchange}): ${opp.short_balance:.2f}\n"
                     f"LONG  ({opp.long_exchange}):  ${opp.long_balance:.2f}\n"
-                    f"Цена SHORT: {opp.short_price}\nЦена LONG: {opp.long_price}",
+                    f"SHORT price: {opp.short_price}\nLONG price: {opp.long_price}",
                     parse_mode="HTML",
                 )
         elif data.startswith("close:"):
@@ -190,7 +190,7 @@ class TelegramBot:
         elif data == "closeall:confirm":
             await self._handle_closeall(query)
         elif data == "closeall:cancel":
-            await query.edit_message_text("❌ Отменено.")
+            await query.edit_message_text("❌ Cancelled.")
         elif data.startswith("ex_toggle:"):
             name = data[10:]
             if name in self._disabled_exchanges:
@@ -205,7 +205,7 @@ class TelegramBot:
             parts = key.split(":")
             if len(parts) == 3:
                 symbol, short_ex, long_ex = parts
-                await query.edit_message_text(f"🔄 Бот перезапускался — сканирую {symbol} заново...")
+                await query.edit_message_text(f"🔄 Bot restarted — rescanning {symbol} again...")
                 try:
                     opps = await self.scanner.scan()
                     opp = next(
@@ -214,28 +214,28 @@ class TelegramBot:
                         None,
                     )
                 except Exception as e:
-                    await query.edit_message_text(f"❌ Ошибка сканирования: {e}")
+                    await query.edit_message_text(f"❌ Scan error: {e}")
                     return
                 if not opp:
-                    await query.edit_message_text(f"❌ {symbol} больше не актуален — жди новый сигнал.")
+                    await query.edit_message_text(f"❌ {symbol} is no longer valid — wait for a new signal.")
                     return
             else:
-                await query.edit_message_text("❌ Сделка устарела — жди новый сигнал.")
+                await query.edit_message_text("❌ Trade expired — wait for a new signal.")
                 return
 
         try:
-            await query.edit_message_text("🔄 Повторная проверка условий...")
+            await query.edit_message_text("🔄 Re-checking conditions...")
         except Exception:
             pass
 
         valid, reason = await self._recheck(opp)
         if not valid:
             self._pending.pop(key, None)
-            await self.send(f"❌ Сделка отменена: {reason}")
+            await self.send(f"❌ Trade cancelled: {reason}")
             return
 
         mode_tag = "📄 [PAPER] " if self.paper_mode else ""
-        await self.send(f"🚀 {mode_tag}Открываю {opp.symbol}...")
+        await self.send(f"🚀 {mode_tag}Opening {opp.symbol}...")
         result = await self.executor.open_pair(opp)
         self._pending.pop(key, None)
 
@@ -285,43 +285,43 @@ class TelegramBot:
 
             new_spread = short_fr.rate - long_fr.rate
             if new_spread < Decimal("0.0003"):
-                return False, f"Спред упал до {new_spread:.4%}"
+                return False, f"Spread dropped to {new_spread:.4%}"
 
             old_avg = (opp.short_price + opp.long_price) / 2
             new_avg = (short_fr.mark_price + long_fr.mark_price) / 2
             if old_avg > 0:
                 drift = abs(new_avg - old_avg) / old_avg
                 if drift > Decimal("0.005"):
-                    return False, f"Цена ушла на {drift:.2%}"
+                    return False, f"Price drifted by {drift:.2%}"
 
             ba_short = bid_ask_spread(short_fr.bid, short_fr.ask)
             ba_long = bid_ask_spread(long_fr.bid, long_fr.ask)
             if ba_short > self.scanner.max_ba_spread or ba_long > self.scanner.max_ba_spread:
-                return False, "Bid/ask спред слишком широкий"
+                return False, "Bid/ask spread is too wide"
 
             mins = minutes_to_funding(short_fr.next_funding_ts)
             if mins < 15:
-                return False, f"До funding осталось {mins:.0f} мин"
+                return False, f"Time to funding left: {mins:.0f} min"
 
             if not self.paper_mode:
                 short_balance = await short_ex.get_balance()
                 long_balance = await long_ex.get_balance()
                 if short_balance <= 0 or long_balance <= 0:
-                    return False, "Недостаточно баланса"
+                    return False, "Insufficient balance"
 
             if self.tracker.get(opp.symbol):
-                return False, "Позиция по этой монете уже открыта"
+                return False, "Position for this symbol is already open"
 
             return True, ""
         except Exception as e:
-            return False, f"Ошибка проверки: {e}"
+            return False, f"Re-check error: {e}"
 
     async def _handle_close(self, symbol: str, query):
         pair = self.tracker.get(symbol)
         if not pair:
-            await query.edit_message_text(f"❌ Нет открытой позиции по {symbol}")
+            await query.edit_message_text(f"❌ No open position for {symbol}")
             return
-        await query.edit_message_text(f"🔄 Закрываю {symbol}...")
+        await query.edit_message_text(f"🔄 Closing {symbol}...")
         result = await self.executor.close_pair(symbol, pair.short_exchange, pair.long_exchange)
 
         closed_trade = None
@@ -351,7 +351,7 @@ class TelegramBot:
             self._signal_sent_at[symbol] = time.time()  # cooldown after close
             if already_gone and self.live_ledger:
                 self.live_ledger.note_close(symbol)
-        await self.send(format_trade_result(result, action="закрыта", paper=self.paper_mode, trade=closed_trade))
+        await self.send(format_trade_result(result, action="closed", paper=self.paper_mode, trade=closed_trade))
 
     # ── Commands ──────────────────────────────────────────────────────────────
 
@@ -359,20 +359,20 @@ class TelegramBot:
         pairs = self.tracker.get_all()
         mode = "📄 PAPER MODE\n\n" if self.paper_mode else ""
         if not pairs:
-            await update.message.reply_html(f"{mode}Нет открытых позиций.")
+            await update.message.reply_html(f"{mode}No open positions.")
             return
-        lines = [f"{mode}<b>Открытые позиции:</b>\n"]
+        lines = [f"{mode}<b>Open positions:</b>\n"]
         for p in pairs:
             lines.append(format_position(p))
             lines.append("")
         await update.message.reply_html("\n".join(lines))
 
     async def cmd_opportunities(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("🔍 Сканирую...")
+        await update.message.reply_text("🔍 Scanning...")
         opps = await self.scanner.scan()
         opps = [o for o in opps if not self.tracker.get(o.symbol)]
         if not opps:
-            await update.message.reply_text("Подходящих связок не найдено.")
+            await update.message.reply_text("No suitable setups found.")
             return
         for opp in opps[:5]:
             key = f"{opp.symbol}:{opp.short_exchange}:{opp.long_exchange}"
@@ -388,40 +388,40 @@ class TelegramBot:
             await update.message.reply_html(text, reply_markup=keyboard)
 
     async def cmd_balances(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        lines = ["<b>Балансы:</b>"]
+        lines = ["<b>Balances:</b>"]
         for name, ex in self.exchanges.items():
             if ex.read_only:
-                lines.append(f"{name}: (только мониторинг)")
+                lines.append(f"{name}: (monitoring only)")
                 continue
             try:
                 bal = await ex.get_balance()
                 lines.append(f"{name}: ${bal:.2f}")
             except Exception as e:
-                lines.append(f"{name}: ошибка ({e})")
+                lines.append(f"{name}: error ({e})")
         await update.message.reply_html("\n".join(lines))
 
     async def cmd_close(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         args = ctx.args
         if not args:
-            await update.message.reply_text("Использование: /close SYMBOL\nПример: /close SOL")
+            await update.message.reply_text("Usage: /close SYMBOL\nExample: /close SOL")
             return
         symbol = args[0].upper()
         pair = self.tracker.get(symbol)
         if not pair:
-            await update.message.reply_text(f"Нет открытой позиции по {symbol}")
+            await update.message.reply_text(f"No open position for {symbol}")
             return
         mode_tag = " [PAPER]" if self.paper_mode else ""
         keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton(f"✅ Закрыть {symbol}{mode_tag}", callback_data=f"close:{symbol}"),
+            InlineKeyboardButton(f"✅ Close {symbol}{mode_tag}", callback_data=f"close:{symbol}"),
         ]])
         await update.message.reply_text(
-            f"Закрыть {symbol}?\nSHORT: {pair.short_exchange} | LONG: {pair.long_exchange}",
+            f"Close {symbol}?\nSHORT: {pair.short_exchange} | LONG: {pair.long_exchange}",
             reply_markup=keyboard,
         )
 
     async def cmd_log(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self.paper_mode or not self.executor.paper_ledger:
-            await update.message.reply_text("Лог доступен только в paper mode.")
+            await update.message.reply_text("Log is available only in paper mode.")
             return
         trades = self.executor.paper_ledger.get_all_closed()
         await update.message.reply_html(format_paper_log(trades))
@@ -435,15 +435,15 @@ class TelegramBot:
             recent = self.live_ledger.recent_closed(10)
             await update.message.reply_html(format_live_stats(stats, recent))
         else:
-            await update.message.reply_text("Статистика недоступна.")
+            await update.message.reply_text("Statistics are unavailable.")
 
     async def _handle_closeall(self, query):
         import time
         pairs = self.tracker.get_all()
         if not pairs:
-            await query.edit_message_text("Нет открытых позиций.")
+            await query.edit_message_text("No open positions.")
             return
-        await query.edit_message_text(f"🔄 Закрываю {len(pairs)} позиций...")
+        await query.edit_message_text(f"🔄 Closing {len(pairs)} positions...")
         lines = []
         for pair in pairs:
             result = await self.executor.close_pair(pair.symbol, pair.short_exchange, pair.long_exchange)
@@ -459,10 +459,10 @@ class TelegramBot:
                             reason="closeall",
                         )
                     self.live_ledger.note_close(pair.symbol)
-                lines.append(f"✅ {pair.symbol} закрыт")
+                lines.append(f"✅ {pair.symbol} closed")
             else:
-                lines.append(f"❌ {pair.symbol}: {result.error or 'ошибка'}")
-        await self.send("Результат закрытия всех позиций:\n" + "\n".join(lines))
+                lines.append(f"❌ {pair.symbol}: {result.error or 'error'}")
+        await self.send("Close-all result:\n" + "\n".join(lines))
 
     def _exchanges_keyboard(self) -> InlineKeyboardMarkup:
         rows = []
@@ -470,21 +470,21 @@ class TelegramBot:
             if ex.read_only:
                 continue
             enabled = name not in self._disabled_exchanges
-            label = f"✅ {name}" if enabled else f"🔴 {name} (откл)"
+            label = f"✅ {name}" if enabled else f"🔴 {name} (off)"
             rows.append([InlineKeyboardButton(label, callback_data=f"ex_toggle:{name}")])
         return InlineKeyboardMarkup(rows)
 
     async def _send_exchanges_menu(self, message, edit: bool = False):
         disabled = self._disabled_exchanges
-        text = "<b>Биржи:</b>\n"
+        text = "<b>Venues:</b>\n"
         for name, ex in self.exchanges.items():
             if ex.read_only:
-                text += f"  {name}: 👁 только мониторинг\n"
+                text += f"  {name}: 👁 monitoring only\n"
             elif name in disabled:
-                text += f"  {name}: 🔴 отключена\n"
+                text += f"  {name}: 🔴 disabled\n"
             else:
-                text += f"  {name}: ✅ активна\n"
-        text += "\nНажми на биржу чтобы включить/отключить:"
+                text += f"  {name}: ✅ active\n"
+        text += "\nClick a venue to enable/disable it:"
         kb = self._exchanges_keyboard()
         if edit:
             await message.edit_text(text, parse_mode="HTML", reply_markup=kb)
@@ -497,50 +497,50 @@ class TelegramBot:
     async def cmd_closeall(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         pairs = self.tracker.get_all()
         if not pairs:
-            await update.message.reply_text("Нет открытых позиций.")
+            await update.message.reply_text("No open positions.")
             return
         symbols = ", ".join(p.symbol for p in pairs)
         keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton(f"✅ Закрыть все ({len(pairs)}): {symbols}", callback_data="closeall:confirm"),
-            InlineKeyboardButton("❌ Отмена", callback_data="closeall:cancel"),
+            InlineKeyboardButton(f"✅ Close all ({len(pairs)}): {symbols}", callback_data="closeall:confirm"),
+            InlineKeyboardButton("❌ Cancel", callback_data="closeall:cancel"),
         ]])
-        await update.message.reply_text(f"Закрыть все позиции?\n{symbols}", reply_markup=keyboard)
+        await update.message.reply_text(f"Close all positions?\n{symbols}", reply_markup=keyboard)
 
     async def cmd_pause(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         self._paused = True
-        await update.message.reply_text("⏸ Сигналы остановлены.")
+        await update.message.reply_text("⏸ Signals paused.")
 
     async def cmd_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         self._paused = False
-        await update.message.reply_text("▶️ Сигналы возобновлены.")
+        await update.message.reply_text("▶️ Signals resumed.")
 
     async def cmd_settings(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         mode = "📄 PAPER" if self.paper_mode else "🔴 LIVE"
         now_il = datetime.now(_IL_TZ).strftime("%H:%M")
-        trading = "✅ активно" if _is_trading_hours() else f"🌙 пауза (окно {TRADING_HOUR_START}:00–{TRADING_HOUR_END}:00 IL)"
+        trading = "✅ active" if _is_trading_hours() else f"🌙 paused (window {TRADING_HOUR_START}:00–{TRADING_HOUR_END}:00 IL)"
         await update.message.reply_html(
-            f"<b>Настройки:</b>\n"
-            f"Режим: <b>{mode}</b>\n"
-            f"Маржа: ${self.margin_usd}\n"
-            f"Плечо: {self.leverage}x\n"
-            f"Позиция: ${self.margin_usd * self.leverage}\n"
-            f"Биржи: {', '.join(self.exchanges.keys())}\n"
-            f"Время IL: {now_il} — {trading}"
+            f"<b>Settings:</b>\n"
+            f"Mode: <b>{mode}</b>\n"
+            f"Margin: ${self.margin_usd}\n"
+            f"Leverage: {self.leverage}x\n"
+            f"Position: ${self.margin_usd * self.leverage}\n"
+            f"Venues: {', '.join(self.exchanges.keys())}\n"
+            f"IL time: {now_il} — {trading}"
         )
 
     async def send_startup(self):
         mode = "📄 PAPER" if self.paper_mode else "🔴 LIVE"
         await self.app.bot.set_my_commands([
-            BotCommand("status",        "Открытые позиции"),
-            BotCommand("closeall",      "Закрыть все позиции"),
-            BotCommand("exchanges",     "Включить / отключить биржи"),
-            BotCommand("pause",         "Остановить сканирование"),
-            BotCommand("resume",        "Запустить сканирование"),
-            BotCommand("balances",      "Балансы бирж"),
-            BotCommand("opportunities", "Сканировать рынок"),
-            BotCommand("settings",      "Настройки бота"),
+            BotCommand("status",        "Open positions"),
+            BotCommand("closeall",      "Close all positions"),
+            BotCommand("exchanges",     "Enable / disable venues"),
+            BotCommand("pause",         "Pause scanning"),
+            BotCommand("resume",        "Resume scanning"),
+            BotCommand("balances",      "Exchange balances"),
+            BotCommand("opportunities", "Scan market"),
+            BotCommand("settings",      "Bot settings"),
         ])
-        await self.send(f"🤖 Бот запущен [{mode}]\nСтарые кнопки недействительны — жди новые сигналы.")
+        await self.send(f"🤖 Bot started [{mode}]\nOld buttons are invalid — wait for new signals.")
 
     def build(self) -> Application:
         self.app = Application.builder().token(self.token).build()

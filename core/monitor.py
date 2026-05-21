@@ -96,9 +96,9 @@ class FundingMonitor:
                 missing.append(f"SHORT ({pair.short_exchange})")
             if not pair.long_pos:
                 missing.append(f"LONG ({pair.long_exchange})")
-            reason = f"нога пропала: {', '.join(missing)}"
+            reason = f"leg missing: {', '.join(missing)}"
             log.error(f"EMERGENCY {pair.symbol}: {reason}")
-            await self._trigger_close(pair.symbol, f"🚨 Аварийное закрытие — {reason}")
+            await self._trigger_close(pair.symbol, f"🚨 Emergency close — {reason}")
             return
 
         if not pair.is_healthy:
@@ -111,9 +111,9 @@ class FundingMonitor:
         # 2. Stop-loss: any leg down > 50% of margin
         if short_pnl < sl_threshold or long_pnl < sl_threshold:
             worst = min(short_pnl, long_pnl)
-            reason = f"стоп-лосс: нога в убытке {worst:.4f} USD (лимит {sl_threshold:.2f} USD)"
+            reason = f"stop-loss: one leg is down {worst:.4f} USD (limit {sl_threshold:.2f} USD)"
             log.warning(f"STOP-LOSS {pair.symbol}: {reason}")
-            await self._trigger_close(pair.symbol, f"🛑 Стоп-лосс — {reason}")
+            await self._trigger_close(pair.symbol, f"🛑 Stop-loss — {reason}")
             return
 
         # 3. Time-based close: random target per position in [4, 5] hours
@@ -129,11 +129,11 @@ class FundingMonitor:
             if mins is None:
                 return
             if mins > MIN_MINUTES_TO_FUNDING_FOR_CLOSE:
-                reason = f"таймер: позиция открыта {age_h:.1f}ч (цель {target_h:.1f}ч), до funding {mins:.0f} мин"
+                reason = f"timer: position open for {age_h:.1f}h (target {target_h:.1f}h), time to funding {mins:.0f} min"
                 log.info(f"TIMER CLOSE {pair.symbol}: {reason}")
-                await self._trigger_close(pair.symbol, f"⏱ Закрытие по таймеру — {reason}")
+                await self._trigger_close(pair.symbol, f"⏱ Timer close — {reason}")
             else:
-                log.info(f"{pair.symbol}: таймер сработал, но до funding {mins:.0f} мин — ждём")
+                log.info(f"{pair.symbol}: timer triggered, but time to funding is {mins:.0f} min — waiting")
 
     async def _minutes_to_next_funding(self, pair: PairState) -> float | None:
         """Get minutes to next funding on the short leg exchange."""

@@ -1,106 +1,104 @@
 # CarryPilot
 
-Telegram-бот для полуавтоматического арбитража funding rates между perpetual exchanges.
+CarryPilot is a Telegram-based assistant for semi-automated funding-rate arbitrage between perpetual futures venues.
 
-CarryPilot — risk-aware funding strategy assistant: он находит delta-neutral carry opportunities, показывает их в Telegram и открывает сделку только после ручного approve.
+It monitors funding-rate differences across exchanges, filters opportunities by estimated net profit, liquidity, bid/ask spread, and time to funding, then sends actionable Telegram alerts. Trades are opened only after manual approval via Telegram.
 
-Проект сканирует разницу funding rates между биржами, фильтрует связки по net profit / ликвидности / времени до funding и отправляет сигнал в Telegram. Сделка открывается только после ручного approve через кнопку.
+> ⚠️ This is high-risk trading infrastructure. CarryPilot does not guarantee profit. Run paper mode first and use small sizes before any live deployment.
 
-> ⚠️ Это high-risk trading infrastructure. Бот не гарантирует прибыль. Перед live-режимом обязательно гонять paper mode и малые размеры.
+## What CarryPilot does
 
-## Что делает бот
+- Scans funding rates across multiple perpetual futures venues.
+- Finds delta-neutral carry setups:
+  - SHORT on the venue with the higher funding rate.
+  - LONG on the venue with the lower funding rate.
+- Estimates net profit after approximate fees and bid/ask spread costs.
+- Sends Telegram signals with buttons:
+  - `Approve` — open the pair.
+  - `Skip` — ignore the signal.
+  - `Details` — view balances and prices.
+- Re-checks trade conditions before opening.
+- Tracks open positions and statistics.
+- Automatically closes positions based on risk rules.
 
-- Сканирует funding rates по нескольким perp-площадкам.
-- Ищет delta-neutral связки:
-  - SHORT на бирже с более высоким funding rate.
-  - LONG на бирже с более низким funding rate.
-- Считает примерный net profit после fees и bid/ask spread.
-- Отправляет сигнал в Telegram с кнопками:
-  - `Approve` — открыть пару.
-  - `Skip` — пропустить.
-  - `Details` — посмотреть балансы и цены.
-- Перед открытием повторно проверяет условия сделки.
-- Ведёт открытые позиции и статистику.
-- Автоматически закрывает позиции по risk rules.
+## Supported venues
 
-## Поддерживаемые площадки
-
-Текущая структура проекта:
+Current project structure:
 
 - `extended` — trading mode.
 - `nado` — trading mode.
 - `01` / `zero_one` — trading mode.
 - `variational` — read-only monitoring.
-- `kraken` — есть конфиг, но фактическое подключение зависит от реализации exchange adapter.
+- `kraken` — configuration exists; actual usage depends on the exchange adapter implementation.
 
-Биржа с `read_only=True` используется только для мониторинга и не участвует в открытии сделок.
+Venues with `read_only=True` are used only for monitoring and are not used for trade execution.
 
-## Архитектура
+## Architecture
 
 ```text
 main.py
-├── exchanges/          # adapters бирж
-├── core/scanner.py     # поиск funding opportunities
-├── core/executor.py    # открытие / закрытие пар
+├── exchanges/          # exchange adapters
+├── core/scanner.py     # funding opportunity discovery
+├── core/executor.py    # pair opening / closing
 ├── core/monitor.py     # scan loop + risk monitoring
 ├── core/position_tracker.py
 ├── core/paper_ledger.py
 ├── core/live_ledger.py
-├── bot/telegram_bot.py # Telegram commands + approve flow
-└── utils/              # расчёты и логирование
+├── bot/telegram_bot.py # Telegram commands + approval flow
+└── utils/              # calculations and logging
 ```
 
 ## Risk model
 
-Бот построен как semi-automated workflow, не как полностью автономный trading bot.
+CarryPilot is designed as a semi-automated workflow, not as a fully autonomous trading bot.
 
-### Перед входом
+### Before entry
 
-- Сигнал проходит фильтры:
-  - минимальный funding spread;
-  - минимальный net profit;
-  - максимальный bid/ask spread;
-  - минимальное время до funding;
-  - sanity cap по аномальным funding rates;
-  - наличие баланса на обеих биржах;
-  - отсутствие уже открытой позиции по символу.
-- Перед approve бот делает re-check:
-  - ping обеих бирж;
-  - funding spread всё ещё актуален;
-  - цена не ушла слишком далеко;
-  - bid/ask spread в лимите;
-  - достаточно времени до funding;
-  - достаточно баланса.
+- The signal must pass filters for:
+  - minimum funding spread;
+  - minimum estimated net profit;
+  - maximum bid/ask spread;
+  - minimum time to funding;
+  - sanity cap for anomalous funding rates;
+  - available balance on both venues;
+  - no already-open position for the same symbol.
+- After the user clicks `Approve`, the bot performs a re-check:
+  - pings both venues;
+  - verifies the funding spread is still valid;
+  - checks that price has not drifted too far;
+  - checks bid/ask spread limits;
+  - verifies enough time remains before funding;
+  - verifies sufficient balance.
 
-### После входа
+### After entry
 
-- Контроль открытых позиций каждые ~30 секунд.
+- Open positions are checked approximately every 30 seconds.
 - Auto-close conditions:
-  - одна нога пропала / позиция стала unhealthy;
-  - stop-loss: любая нога в убытке больше 50% margin;
-  - time-based close: случайная цель закрытия примерно через 4–5 часов, если до funding больше 5 минут.
-- Если в live mode одна нога не открылась, бот пытается аварийно закрыть вторую.
+  - one leg disappears or the position becomes unhealthy;
+  - stop-loss: any leg loses more than 50% of margin;
+  - time-based close: randomized close target around 4–5 hours, if more than 5 minutes remain before funding.
+- In live mode, if one leg fails to open, the bot attempts to emergency-close the other leg.
 
-## Основные риски
+## Main risks
 
-- Execution risk: одна нога может открыться, вторая — нет.
-- Liquidity / slippage risk: funding spread может не покрыть проскальзывание.
-- API risk: биржа может вернуть stale / incomplete данные.
-- Funding timing risk: ставка может измениться до фактического funding.
-- Basis risk: цены на разных площадках могут разъехаться.
-- Operational risk: Telegram, сервер, сеть или exchange API могут упасть.
-- Key risk: `.env` содержит приватные ключи, его нельзя коммитить.
+- Execution risk: one leg may open while the other fails.
+- Liquidity / slippage risk: the funding spread may not cover slippage.
+- API risk: an exchange may return stale or incomplete data.
+- Funding timing risk: the funding rate can change before the actual funding payment.
+- Basis risk: prices can diverge across venues.
+- Operational risk: Telegram, server, network, or exchange APIs can fail.
+- Key risk: `.env` contains private keys and must never be committed.
 
-## Установка
+## Installation
 
-### 1. Клонировать репозиторий
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/milanewgpt/carrypilot.git
 cd carrypilot
 ```
 
-### 2. Создать virtualenv
+### 2. Create a virtual environment
 
 ```bash
 python3 -m venv .venv
@@ -108,14 +106,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Настроить `.env`
+### 3. Configure `.env`
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-Пример переменных:
+Example variables:
 
 ```env
 # Extended exchange
@@ -147,21 +145,21 @@ MAX_BID_ASK_SPREAD=0.0005
 SCAN_INTERVAL=30
 ```
 
-## Запуск
+## Running
 
-### Paper mode — рекомендуемый первый запуск
+### Paper mode — recommended first run
 
 ```bash
 PAPER_TRADING=true python main.py
 ```
 
-Или через `.env`:
+Or set it in `.env`:
 
 ```env
 PAPER_TRADING=true
 ```
 
-Затем:
+Then run:
 
 ```bash
 python main.py
@@ -169,7 +167,7 @@ python main.py
 
 ### Live mode
 
-Только после проверки paper mode:
+Only after paper-mode validation:
 
 ```env
 PAPER_TRADING=false
@@ -188,13 +186,13 @@ docker run --env-file .env carrypilot
 
 ## systemd
 
-В репозитории есть пример service file:
+The repository includes an example service file:
 
 ```text
 systemd/funding-arb-bot.service
 ```
 
-Базовый flow:
+Basic flow:
 
 ```bash
 sudo cp systemd/funding-arb-bot.service /etc/systemd/system/funding-arb-bot.service
@@ -204,9 +202,9 @@ sudo systemctl start funding-arb-bot
 sudo systemctl status funding-arb-bot
 ```
 
-Перед использованием проверь пути внутри service file:
+Check paths in the service file before use:
 
-> Если бот уже задеплоен в `/home/gpt/funding-arb-bot`, можно оставить старый server path. Rename GitHub repo сам по себе не требует менять рабочую папку на сервере.
+> If the bot is already deployed in `/home/gpt/funding-arb-bot`, the old server path can remain unchanged. Renaming the GitHub repository does not require changing the deployment directory.
 
 ```ini
 User=gpt
@@ -217,85 +215,85 @@ ExecStart=/usr/bin/python3 main.py
 
 ## Telegram commands
 
-- `/status` — открытые позиции.
-- `/opportunities` — ручной scan рынка.
-- `/balances` — балансы по биржам.
-- `/close SYMBOL` — закрыть одну позицию.
-- `/closeall` — закрыть все позиции.
-- `/exchanges` — включить / отключить биржи для сигналов.
-- `/pause` — остановить отправку новых сигналов.
-- `/resume` — возобновить сигналы.
-- `/settings` — текущие настройки.
-- `/stats` — статистика paper/live сделок.
-- `/log` — история paper trades.
+- `/status` — show open positions.
+- `/opportunities` — scan the market manually.
+- `/balances` — show exchange balances.
+- `/close SYMBOL` — close one position.
+- `/closeall` — close all positions.
+- `/exchanges` — enable / disable venues for signals.
+- `/pause` — pause new signals.
+- `/resume` — resume new signals.
+- `/settings` — show current settings.
+- `/stats` — show paper/live trade statistics.
+- `/log` — show paper trade history.
 
-## Настройки стратегии
+## Strategy settings
 
-Основные параметры задаются через `.env`:
+Main runtime parameters are set via `.env`:
 
-- `POSITION_MARGIN_USD` — margin на одну сторону.
-- `LEVERAGE` — плечо.
-- `MIN_FUNDING_SPREAD` — минимальный gross funding spread.
-- `MIN_NET_PROFIT` — минимальный net profit после примерных costs.
-- `MIN_MINUTES_TO_FUNDING` — не входить слишком близко к funding.
-- `MAX_BID_ASK_SPREAD` — фильтр ликвидности.
-- `SCAN_INTERVAL` — интервал сканирования в секундах.
-- `PAPER_TRADING` — paper/live режим.
+- `POSITION_MARGIN_USD` — margin per side.
+- `LEVERAGE` — leverage.
+- `MIN_FUNDING_SPREAD` — minimum gross funding spread.
+- `MIN_NET_PROFIT` — minimum estimated net profit after costs.
+- `MIN_MINUTES_TO_FUNDING` — avoid entering too close to funding.
+- `MAX_BID_ASK_SPREAD` — liquidity filter.
+- `SCAN_INTERVAL` — scan interval in seconds.
+- `PAPER_TRADING` — paper/live mode.
 
-Дополнительный YAML-конфиг лежит в:
+Additional YAML configuration is available at:
 
 ```text
 config/settings.yaml
 ```
 
-На текущей версии основная runtime-конфигурация читается из `.env`.
+In the current version, primary runtime configuration is read from `.env`.
 
 ## Paper trading
 
 Paper mode:
 
-- не отправляет реальные orders;
-- симулирует fill по текущим mark prices;
-- пишет сделки в `paper_trades.json`;
-- позволяет проверить:
-  - качество сигналов;
-  - частоту opportunities;
-  - поведение auto-close;
-  - Telegram approve flow;
-  - PnL decomposition между price delta и funding estimate.
+- does not send real orders;
+- simulates fills using current mark prices;
+- writes trades to `paper_trades.json`;
+- helps validate:
+  - signal quality;
+  - opportunity frequency;
+  - auto-close behavior;
+  - Telegram approval flow;
+  - PnL decomposition between price delta and estimated funding.
 
-Рекомендуемый workflow:
+Recommended workflow:
 
-1. Запустить `PAPER_TRADING=true`.
-2. Дать боту поработать несколько дней.
-3. Проверить `/stats` и `/log`.
-4. Ужесточить фильтры, если сигналов слишком много или PnL нестабилен.
-5. Только потом переходить к live с минимальной маржой.
+1. Run with `PAPER_TRADING=true`.
+2. Let the bot run for several days.
+3. Check `/stats` and `/log`.
+4. Tighten filters if there are too many signals or unstable PnL.
+5. Move to live mode only with minimal margin.
 
 ## Security
 
-- Никогда не коммить `.env`.
-- Используй отдельные wallets/API keys с лимитированным балансом.
-- Не держи крупные суммы на экспериментальных perp-площадках.
-- Для live лучше использовать отдельный сервер/user и systemd service.
-- После любых изменений сначала запускать paper mode.
+- Never commit `.env`.
+- Use separate wallets/API keys with limited balances.
+- Do not keep large balances on experimental perp venues.
+- For live mode, prefer a dedicated server/user and systemd service.
+- After any code or configuration change, test in paper mode first.
 
 ## Development notes
 
-Проверка импорта / синтаксиса:
+Check imports and syntax:
 
 ```bash
 python -m compileall .
 ```
 
-Ручной запуск:
+Manual run:
 
 ```bash
 python main.py
 ```
 
-Логи выводятся в stdout через project logger.
+Logs are written to stdout via the project logger.
 
 ## Disclaimer
 
-Проект предназначен для research / semi-automated execution. Это не financial advice и не гарантия доходности. Funding arbitrage может быть прибыльным только при контроле execution, liquidity, fees, API reliability и operational risk.
+CarryPilot is intended for research and semi-automated execution. It is not financial advice and does not guarantee profitability. Funding arbitrage can only work if execution, liquidity, fees, API reliability, and operational risk are controlled.

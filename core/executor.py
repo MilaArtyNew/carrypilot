@@ -74,7 +74,7 @@ class TradeExecutor:
                 success=False, symbol=opp.symbol,
                 short_exchange=opp.short_exchange, long_exchange=opp.long_exchange,
                 short_order=None, long_order=None, qty=qty,
-                error="Qty is zero — проверь маржу и цену",
+                error="Qty is zero — check margin and price",
             )
 
         trade = self.paper_ledger.open(opp, qty, short_price, long_price)
