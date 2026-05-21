@@ -1,6 +1,8 @@
-# Funding Arb Bot
+# CarryPilot
 
 Telegram-бот для полуавтоматического арбитража funding rates между perpetual exchanges.
+
+CarryPilot — risk-aware funding strategy assistant: он находит delta-neutral carry opportunities, показывает их в Telegram и открывает сделку только после ручного approve.
 
 Проект сканирует разницу funding rates между биржами, фильтрует связки по net profit / ликвидности / времени до funding и отправляет сигнал в Telegram. Сделка открывается только после ручного approve через кнопку.
 
@@ -94,8 +96,8 @@ main.py
 ### 1. Клонировать репозиторий
 
 ```bash
-git clone https://github.com/milanewgpt/funding-arb-bot.git
-cd funding-arb-bot
+git clone https://github.com/milanewgpt/carrypilot.git
+cd carrypilot
 ```
 
 ### 2. Создать virtualenv
@@ -180,8 +182,8 @@ python main.py
 ## Docker
 
 ```bash
-docker build -t funding-arb-bot .
-docker run --env-file .env funding-arb-bot
+docker build -t carrypilot .
+docker run --env-file .env carrypilot
 ```
 
 ## systemd
@@ -203,6 +205,8 @@ sudo systemctl status funding-arb-bot
 ```
 
 Перед использованием проверь пути внутри service file:
+
+> Если бот уже задеплоен в `/home/gpt/funding-arb-bot`, можно оставить старый server path. Rename GitHub repo сам по себе не требует менять рабочую папку на сервере.
 
 ```ini
 User=gpt
