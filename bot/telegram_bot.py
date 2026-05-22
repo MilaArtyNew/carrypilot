@@ -149,11 +149,9 @@ class TelegramBot:
             )
             self.live_ledger.note_close(symbol)
 
-        already_gone = (
-            not result.success
-            and result.error
-            and "No open position" in result.error
-        )
+        _short_gone = bool(result.short_order and "No open position" in (result.short_order.error or ""))
+        _long_gone  = bool(result.long_order  and "No open position" in (result.long_order.error  or ""))
+        already_gone = not result.success and _short_gone and _long_gone
         if result.success or already_gone:
             self.tracker.remove_pair(symbol)
             self._signal_sent_at[symbol] = time.time()  # cooldown after close
@@ -341,11 +339,9 @@ class TelegramBot:
             )
             self.live_ledger.note_close(symbol)
 
-        already_gone = (
-            not result.success
-            and result.error
-            and "No open position" in result.error
-        )
+        _short_gone = bool(result.short_order and "No open position" in (result.short_order.error or ""))
+        _long_gone  = bool(result.long_order  and "No open position" in (result.long_order.error  or ""))
+        already_gone = not result.success and _short_gone and _long_gone
         if result.success or already_gone:
             self.tracker.remove_pair(symbol)
             self._signal_sent_at[symbol] = time.time()  # cooldown after close

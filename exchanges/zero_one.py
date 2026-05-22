@@ -444,7 +444,17 @@ class ZeroOneExchange(ExchangeBase):
         )
 
     async def close_position(self, symbol: str) -> OrderResult:
-        pos = await self.get_position(symbol)
+        # Retry get_position up to 3 times — 01.xyz API sometimes transiently
+        # returns None even when a position exists, which would leave the SHORT
+        # open while the other leg closes, causing silent accumulation.
+        pos = None
+        for attempt in range(3):
+            pos = await self.get_position(symbol)
+            if pos:
+                break
+            if attempt < 2:
+                log.warning(f"01 close_position: {symbol} not found (attempt {attempt + 1}/3), retrying...")
+                await asyncio.sleep(1)
         if not pos:
             return OrderResult(exchange=self.name, symbol=symbol, order_id="",
                                side="", qty=Decimal(0), price=Decimal(0),
