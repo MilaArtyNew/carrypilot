@@ -20,6 +20,7 @@ log = get_logger("monitor")
 MIN_MINUTES_TO_FUNDING_FOR_CLOSE = 5.0
 CLOSE_WINDOW_MIN_HOURS = 4.0
 CLOSE_WINDOW_MAX_HOURS = 5.0
+OPEN_GRACE_SECONDS = 120  # positions may not surface on exchange APIs immediately after order fill
 
 
 class FundingMonitor:
@@ -91,6 +92,10 @@ class FundingMonitor:
     async def _check_pair(self, pair: PairState):
         # 1. Unhealthy: one or both legs missing — skip in paper mode (can't lose a leg)
         if not self.paper_mode and not pair.is_healthy:
+            age_s = pair.age_hours * 3600
+            if age_s < OPEN_GRACE_SECONDS:
+                log.debug(f"{pair.symbol}: unhealthy but only {age_s:.0f}s old — waiting for position to surface")
+                return
             missing = []
             if not pair.short_pos:
                 missing.append(f"SHORT ({pair.short_exchange})")

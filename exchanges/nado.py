@@ -83,6 +83,20 @@ class NadoExchange(ExchangeBase):
             raise ValueError(f"Unknown symbol {symbol} on Nado")
         return pid
 
+    async def _fetch_nado_prices(self, client, pid: int) -> tuple[Decimal, Decimal, Decimal]:
+        """Fetch bid/ask/mark for one product in parallel-safe way."""
+        try:
+            prices, mark_data = await asyncio.gather(
+                self._run(client.market.get_latest_market_price, pid),
+                self._run(client.perp.get_prices, pid),
+            )
+            bid = _x18_to_decimal(prices.bid_x18)
+            ask = _x18_to_decimal(prices.ask_x18)
+            mark = _x18_to_decimal(mark_data.mark_price_x18)
+            return bid, ask, mark
+        except Exception:
+            return Decimal(0), Decimal(0), Decimal(0)
+
     async def get_all_funding_rates(self) -> list[FundingRate]:
         await self._ensure_symbol_map()
         client = self._get_client()
@@ -90,28 +104,22 @@ class NadoExchange(ExchangeBase):
 
         product_ids = list(self._id_map.keys())
         rates_data = await self._run(client.market.get_perp_funding_rates, product_ids)
+
+        # Fetch prices for all symbols in parallel instead of sequentially
+        pid_list = [int(pid_str) for pid_str in rates_data.keys()]
+        price_results = await asyncio.gather(
+            *[self._fetch_nado_prices(client, pid) for pid in pid_list]
+        )
+
+        now = int(time.time())
+        next_hour = ((now // 3600) + 1) * 3600
         results = []
-        for pid_str, fr in rates_data.items():
+        for (pid_str, fr), (bid, ask, mark) in zip(rates_data.items(), price_results):
             pid = int(pid_str)
             symbol = self._id_map.get(pid)
             if not symbol:
                 continue
             rate = _x18_to_decimal(fr.funding_rate_x18)
-
-            # Get prices
-            try:
-                prices = await self._run(client.market.get_latest_market_price, pid)
-                bid = _x18_to_decimal(prices.bid_x18)
-                ask = _x18_to_decimal(prices.ask_x18)
-                mark_data = await self._run(client.perp.get_prices, pid)
-                mark = _x18_to_decimal(mark_data.mark_price_x18)
-            except Exception:
-                bid = ask = mark = Decimal(0)
-
-            # Nado funding: every hour, next_funding_ts not directly exposed
-            # Approximate: next funding = current hour boundary + 1h
-            now = int(time.time())
-            next_hour = ((now // 3600) + 1) * 3600
             # Nado funds hourly — normalize to 8h
             rate_8h = rate * Decimal("8")
             results.append(FundingRate(
