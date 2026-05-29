@@ -140,12 +140,20 @@ class TradeExecutor:
 
         # Use max price so both legs get equal token qty and neither side exceeds notional
         max_price = max(opp.short_price, opp.long_price)
-        step_short, step_long, min_short, min_long = await asyncio.gather(
-            short_ex.get_qty_step(opp.symbol),
-            long_ex.get_qty_step(opp.symbol),
-            short_ex.get_min_qty(opp.symbol),
-            long_ex.get_min_qty(opp.symbol),
-        )
+        try:
+            step_short, step_long, min_short, min_long = await asyncio.gather(
+                short_ex.get_qty_step(opp.symbol),
+                long_ex.get_qty_step(opp.symbol),
+                short_ex.get_min_qty(opp.symbol),
+                long_ex.get_min_qty(opp.symbol),
+            )
+        except Exception as e:
+            return TradeResult(
+                success=False, symbol=opp.symbol,
+                short_exchange=opp.short_exchange, long_exchange=opp.long_exchange,
+                short_order=None, long_order=None, qty=Decimal(0),
+                error=f"Failed to fetch qty params: {e}",
+            )
         qty = calc_qty(self.margin_usd, self.leverage, max_price, max(step_short, step_long))
         required_min = max(min_short, min_long)
 

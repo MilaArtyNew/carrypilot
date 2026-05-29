@@ -226,49 +226,54 @@ class TelegramBot:
         except Exception:
             pass
 
-        valid, reason = await self._recheck(opp)
-        if not valid:
+        try:
+            valid, reason = await self._recheck(opp)
+            if not valid:
+                self._pending.pop(key, None)
+                await self.send(f"❌ Trade cancelled: {reason}")
+                return
+
+            mode_tag = "📄 [PAPER] " if self.paper_mode else ""
+            await self.send(f"🚀 {mode_tag}Opening {opp.symbol}...")
+            result = await self.executor.open_pair(opp)
             self._pending.pop(key, None)
-            await self.send(f"❌ Trade cancelled: {reason}")
-            return
 
-        mode_tag = "📄 [PAPER] " if self.paper_mode else ""
-        await self.send(f"🚀 {mode_tag}Opening {opp.symbol}...")
-        result = await self.executor.open_pair(opp)
-        self._pending.pop(key, None)
-
-        if result.success:
-            short_entry = result.short_order.price
-            long_entry = result.long_order.price
-            self.tracker.add_pair(PairState(
-                symbol=opp.symbol,
-                short_exchange=opp.short_exchange,
-                long_exchange=opp.long_exchange,
-                qty=result.qty,
-                short_entry=short_entry,
-                long_entry=long_entry,
-            ))
-            if self.live_ledger:
-                self.live_ledger.record_open(
+            if result.success:
+                short_entry = result.short_order.price
+                long_entry = result.long_order.price
+                self.tracker.add_pair(PairState(
                     symbol=opp.symbol,
                     short_exchange=opp.short_exchange,
                     long_exchange=opp.long_exchange,
                     qty=result.qty,
                     short_entry=short_entry,
                     long_entry=long_entry,
-                    spread=opp.spread,
-                )
-                self.live_ledger.note_open(opp.symbol, time.time())
-            await self.send(format_trade_result(result, paper=self.paper_mode))
-        else:
-            short_ok = result.short_order and result.short_order.status == "filled"
-            long_ok = result.long_order and result.long_order.status == "filled"
-            if not self.paper_mode and (short_ok or long_ok):
-                await self.send(format_emergency(
-                    opp.symbol, opp.short_exchange, opp.long_exchange, short_ok, long_ok
                 ))
-            else:
+                if self.live_ledger:
+                    self.live_ledger.record_open(
+                        symbol=opp.symbol,
+                        short_exchange=opp.short_exchange,
+                        long_exchange=opp.long_exchange,
+                        qty=result.qty,
+                        short_entry=short_entry,
+                        long_entry=long_entry,
+                        spread=opp.spread,
+                    )
+                    self.live_ledger.note_open(opp.symbol, time.time())
                 await self.send(format_trade_result(result, paper=self.paper_mode))
+            else:
+                short_ok = result.short_order and result.short_order.status == "filled"
+                long_ok = result.long_order and result.long_order.status == "filled"
+                if not self.paper_mode and (short_ok or long_ok):
+                    await self.send(format_emergency(
+                        opp.symbol, opp.short_exchange, opp.long_exchange, short_ok, long_ok
+                    ))
+                else:
+                    await self.send(format_trade_result(result, paper=self.paper_mode))
+        except Exception as e:
+            log.error(f"_handle_approve unhandled exception for {opp.symbol}: {e}", exc_info=True)
+            self._pending.pop(key, None)
+            await self.send(f"❌ Unexpected error opening {opp.symbol}: {e}")
 
     async def _recheck(self, opp: Opportunity) -> tuple[bool, str]:
         from utils import bid_ask_spread, minutes_to_funding
@@ -278,8 +283,10 @@ class TelegramBot:
 
             await asyncio.gather(short_ex.ping(), long_ex.ping())
 
-            short_fr = await short_ex.get_funding_rate(opp.symbol)
-            long_fr = await long_ex.get_funding_rate(opp.symbol)
+            short_fr, long_fr = await asyncio.gather(
+                short_ex.get_funding_rate(opp.symbol),
+                long_ex.get_funding_rate(opp.symbol),
+            )
 
             new_spread = short_fr.rate - long_fr.rate
             if new_spread < Decimal("0.0003"):
