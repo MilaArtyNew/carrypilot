@@ -2,6 +2,7 @@
 Telegram bot: signals, approvals, and management commands.
 """
 import asyncio
+import html as _html
 import time
 from datetime import datetime
 from decimal import Decimal
@@ -273,7 +274,7 @@ class TelegramBot:
         except Exception as e:
             log.error(f"_handle_approve unhandled exception for {opp.symbol}: {e}", exc_info=True)
             self._pending.pop(key, None)
-            await self.send(f"❌ Unexpected error opening {opp.symbol}: {e}")
+            await self.send(f"❌ Unexpected error opening {opp.symbol}: {_html.escape(str(e))}")
 
     async def _recheck(self, opp: Opportunity) -> tuple[bool, str]:
         from utils import bid_ask_spread, minutes_to_funding
@@ -319,7 +320,7 @@ class TelegramBot:
 
             return True, ""
         except Exception as e:
-            return False, f"Re-check error: {e}"
+            return False, f"Re-check error: {_html.escape(str(e))}"
 
     async def _handle_close(self, symbol: str, query):
         pair = self.tracker.get(symbol)
@@ -400,7 +401,7 @@ class TelegramBot:
                 bal = await ex.get_balance()
                 lines.append(f"{name}: ${bal:.2f}")
             except Exception as e:
-                lines.append(f"{name}: error ({e})")
+                lines.append(f"{name}: error ({_html.escape(str(e))})")
         await update.message.reply_html("\n".join(lines))
 
     async def cmd_close(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
