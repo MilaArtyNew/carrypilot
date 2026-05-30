@@ -278,49 +278,52 @@ class TelegramBot:
 
     async def _recheck(self, opp: Opportunity) -> tuple[bool, str]:
         from utils import bid_ask_spread, minutes_to_funding
-        try:
-            short_ex = self.exchanges[opp.short_exchange]
-            long_ex = self.exchanges[opp.long_exchange]
+        short_ex = self.exchanges[opp.short_exchange]
+        long_ex = self.exchanges[opp.long_exchange]
+        last_exc = None
+        for attempt in range(2):
+            try:
+                short_fr, long_fr = await asyncio.gather(
+                    short_ex.get_funding_rate(opp.symbol),
+                    long_ex.get_funding_rate(opp.symbol),
+                )
 
-            await asyncio.gather(short_ex.ping(), long_ex.ping())
+                new_spread = short_fr.rate - long_fr.rate
+                if new_spread < Decimal("0.0003"):
+                    return False, f"Spread dropped to {new_spread:.4%}"
 
-            short_fr, long_fr = await asyncio.gather(
-                short_ex.get_funding_rate(opp.symbol),
-                long_ex.get_funding_rate(opp.symbol),
-            )
+                old_avg = (opp.short_price + opp.long_price) / 2
+                new_avg = (short_fr.mark_price + long_fr.mark_price) / 2
+                if old_avg > 0:
+                    drift = abs(new_avg - old_avg) / old_avg
+                    if drift > Decimal("0.005"):
+                        return False, f"Price drifted by {drift:.2%}"
 
-            new_spread = short_fr.rate - long_fr.rate
-            if new_spread < Decimal("0.0003"):
-                return False, f"Spread dropped to {new_spread:.4%}"
+                ba_short = bid_ask_spread(short_fr.bid, short_fr.ask)
+                ba_long = bid_ask_spread(long_fr.bid, long_fr.ask)
+                if ba_short > self.scanner.max_ba_spread or ba_long > self.scanner.max_ba_spread:
+                    return False, "Bid/ask spread is too wide"
 
-            old_avg = (opp.short_price + opp.long_price) / 2
-            new_avg = (short_fr.mark_price + long_fr.mark_price) / 2
-            if old_avg > 0:
-                drift = abs(new_avg - old_avg) / old_avg
-                if drift > Decimal("0.005"):
-                    return False, f"Price drifted by {drift:.2%}"
+                mins = minutes_to_funding(short_fr.next_funding_ts)
+                if mins < 15:
+                    return False, f"Time to funding left: {mins:.0f} min"
 
-            ba_short = bid_ask_spread(short_fr.bid, short_fr.ask)
-            ba_long = bid_ask_spread(long_fr.bid, long_fr.ask)
-            if ba_short > self.scanner.max_ba_spread or ba_long > self.scanner.max_ba_spread:
-                return False, "Bid/ask spread is too wide"
+                if not self.paper_mode:
+                    short_balance = await short_ex.get_balance()
+                    long_balance = await long_ex.get_balance()
+                    if short_balance <= 0 or long_balance <= 0:
+                        return False, "Insufficient balance"
 
-            mins = minutes_to_funding(short_fr.next_funding_ts)
-            if mins < 15:
-                return False, f"Time to funding left: {mins:.0f} min"
+                if self.tracker.get(opp.symbol):
+                    return False, "Position for this symbol is already open"
 
-            if not self.paper_mode:
-                short_balance = await short_ex.get_balance()
-                long_balance = await long_ex.get_balance()
-                if short_balance <= 0 or long_balance <= 0:
-                    return False, "Insufficient balance"
-
-            if self.tracker.get(opp.symbol):
-                return False, "Position for this symbol is already open"
-
-            return True, ""
-        except Exception as e:
-            return False, f"Re-check error: {_html.escape(str(e)[:500])}"
+                return True, ""
+            except Exception as e:
+                last_exc = e
+                if attempt == 0:
+                    log.warning(f"_recheck {opp.symbol}: transient error, retrying in 3s: {e}")
+                    await asyncio.sleep(3)
+        return False, f"Re-check error: {_html.escape(str(last_exc)[:300])}"
 
     async def _handle_close(self, symbol: str, query):
         pair = self.tracker.get(symbol)
