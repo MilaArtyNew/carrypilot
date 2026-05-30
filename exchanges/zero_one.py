@@ -117,7 +117,11 @@ class ZeroOneExchange(ExchangeBase):
 
     async def _client(self) -> aiohttp.ClientSession:
         if self._http is None or self._http.closed:
-            self._http = aiohttp.ClientSession()
+            self._http = aiohttp.ClientSession(headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+            })
         return self._http
 
     async def _get(self, path: str, params: dict = None) -> dict:
@@ -125,6 +129,9 @@ class ZeroOneExchange(ExchangeBase):
         async with c.get(BASE_URL + path, params=params,
                          timeout=aiohttp.ClientTimeout(total=10)) as r:
             r.raise_for_status()
+            ct = r.headers.get("Content-Type", "")
+            if "text/html" in ct:
+                raise RuntimeError(f"01.xyz returned HTML page — Cloudflare blocking? ({path})")
             return await r.json()
 
     async def _get_text(self, path: str) -> str:
