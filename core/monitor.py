@@ -81,9 +81,32 @@ class FundingMonitor:
         while self._running:
             try:
                 await self.tracker.refresh()
-                for pair in self.tracker.get_all():
+                pairs = self.tracker.get_all()
+
+                # Circuit breaker: if 2+ positions lose a leg on the same exchange
+                # simultaneously, it's an outage — hold emergency closes for that exchange
+                downed: set[str] = set()
+                if not self.paper_mode:
+                    from collections import Counter
+                    missing: Counter = Counter()
+                    for p in pairs:
+                        if not p.is_healthy:
+                            if not p.short_pos:
+                                missing[p.short_exchange] += 1
+                            if not p.long_pos:
+                                missing[p.long_exchange] += 1
+                    downed = {ex for ex, cnt in missing.items() if cnt >= 2}
+                    if downed:
+                        log.warning(f"Circuit breaker: {downed} appear down {dict(missing)} — holding emergency closes this cycle")
+
+                for pair in pairs:
                     if pair.symbol in self._closing:
                         continue
+                    if not self.paper_mode and not pair.is_healthy and downed:
+                        if (not pair.short_pos and pair.short_exchange in downed) or \
+                           (not pair.long_pos and pair.long_exchange in downed):
+                            log.debug(f"{pair.symbol}: skipping health check — exchange outage suspected")
+                            continue
                     await self._check_pair(pair)
             except Exception as e:
                 log.error(f"Position loop error: {e}")
