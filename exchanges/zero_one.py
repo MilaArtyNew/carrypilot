@@ -125,20 +125,24 @@ class ZeroOneExchange(ExchangeBase):
         return self._http
 
     async def _get(self, path: str, params: dict = None) -> dict:
+        import json as _json
         c = await self._client()
         async with c.get(BASE_URL + path, params=params,
                          timeout=aiohttp.ClientTimeout(total=10)) as r:
             r.raise_for_status()
-            ct = r.headers.get("Content-Type", "")
-            if "text/html" in ct:
-                raise RuntimeError(f"01.xyz returned HTML page — Cloudflare blocking? ({path})")
-            return await r.json()
+            text = await r.text()
+            if text.lstrip().startswith("<"):
+                raise RuntimeError(f"01.xyz Cloudflare block ({path})")
+            return _json.loads(text)
 
     async def _get_text(self, path: str) -> str:
         c = await self._client()
         async with c.get(BASE_URL + path, timeout=aiohttp.ClientTimeout(total=10)) as r:
             r.raise_for_status()
-            return await r.text()
+            text = await r.text()
+            if text.lstrip().startswith("<"):
+                raise RuntimeError(f"01.xyz Cloudflare block ({path})")
+            return text
 
     async def _post_action(self, msg: bytes) -> schema_pb2.Receipt:
         c = await self._client()
