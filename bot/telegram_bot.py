@@ -278,6 +278,29 @@ class TelegramBot:
 
     async def _recheck(self, opp: Opportunity) -> tuple[bool, str]:
         from utils import bid_ask_spread, minutes_to_funding
+        import time as _time
+
+        age_s = _time.time() - opp.fetched_at
+
+        # Fresh signal (< 30s) — use cached scanner data, no extra API calls
+        if age_s < 30:
+            spread = opp.short_rate - opp.long_rate
+            if spread < Decimal("0.0003"):
+                return False, f"Spread dropped to {spread:.4%}"
+            ba_short = bid_ask_spread(opp.short_bid, opp.short_ask)
+            ba_long = bid_ask_spread(opp.long_bid, opp.long_ask)
+            if ba_short > self.scanner.max_ba_spread or ba_long > self.scanner.max_ba_spread:
+                return False, "Bid/ask spread is too wide"
+            mins = opp.minutes_to_funding - age_s / 60
+            if mins < 15:
+                return False, f"Time to funding left: {mins:.0f} min"
+            if not self.paper_mode and (opp.short_balance <= 0 or opp.long_balance <= 0):
+                return False, "Insufficient balance"
+            if self.tracker.get(opp.symbol):
+                return False, "Position for this symbol is already open"
+            return True, ""
+
+        # Stale signal — re-fetch from exchanges with retry
         short_ex = self.exchanges[opp.short_exchange]
         long_ex = self.exchanges[opp.long_exchange]
         last_exc = None
@@ -287,36 +310,29 @@ class TelegramBot:
                     short_ex.get_funding_rate(opp.symbol),
                     long_ex.get_funding_rate(opp.symbol),
                 )
-
                 new_spread = short_fr.rate - long_fr.rate
                 if new_spread < Decimal("0.0003"):
                     return False, f"Spread dropped to {new_spread:.4%}"
-
                 old_avg = (opp.short_price + opp.long_price) / 2
                 new_avg = (short_fr.mark_price + long_fr.mark_price) / 2
                 if old_avg > 0:
                     drift = abs(new_avg - old_avg) / old_avg
                     if drift > Decimal("0.005"):
                         return False, f"Price drifted by {drift:.2%}"
-
                 ba_short = bid_ask_spread(short_fr.bid, short_fr.ask)
                 ba_long = bid_ask_spread(long_fr.bid, long_fr.ask)
                 if ba_short > self.scanner.max_ba_spread or ba_long > self.scanner.max_ba_spread:
                     return False, "Bid/ask spread is too wide"
-
                 mins = minutes_to_funding(short_fr.next_funding_ts)
                 if mins < 15:
                     return False, f"Time to funding left: {mins:.0f} min"
-
                 if not self.paper_mode:
                     short_balance = await short_ex.get_balance()
                     long_balance = await long_ex.get_balance()
                     if short_balance <= 0 or long_balance <= 0:
                         return False, "Insufficient balance"
-
                 if self.tracker.get(opp.symbol):
                     return False, "Position for this symbol is already open"
-
                 return True, ""
             except Exception as e:
                 last_exc = e

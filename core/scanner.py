@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from decimal import Decimal
 from itertools import combinations
 from typing import Optional
@@ -35,6 +36,7 @@ class Opportunity:
     minutes_to_funding: float
     short_balance: Decimal
     long_balance: Decimal
+    fetched_at: float = field(default_factory=time.time)
 
 
 class OpportunityScanner:
