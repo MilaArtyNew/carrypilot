@@ -150,13 +150,13 @@ class TelegramBot:
             )
             self.live_ledger.note_close(symbol)
 
-        _short_gone = bool(result.short_order and "No open position" in (result.short_order.error or ""))
-        _long_gone  = bool(result.long_order  and "No open position" in (result.long_order.error  or ""))
-        already_gone = not result.success and _short_gone and _long_gone
-        if result.success or already_gone:
+        def _leg_done(order) -> bool:
+            return order and (order.status == "filled" or "No open position" in (order.error or ""))
+        fully_closed = _leg_done(result.short_order) and _leg_done(result.long_order)
+        if fully_closed:
             self.tracker.remove_pair(symbol)
-            self._signal_sent_at[symbol] = time.time()  # cooldown after close
-            if already_gone and self.live_ledger:
+            self._signal_sent_at[symbol] = time.time()
+            if not result.success and self.live_ledger:
                 self.live_ledger.note_close(symbol)
         await self.send(format_trade_result(result, action="closed (auto)", paper=self.paper_mode, trade=closed_trade))
 
@@ -366,13 +366,13 @@ class TelegramBot:
             )
             self.live_ledger.note_close(symbol)
 
-        _short_gone = bool(result.short_order and "No open position" in (result.short_order.error or ""))
-        _long_gone  = bool(result.long_order  and "No open position" in (result.long_order.error  or ""))
-        already_gone = not result.success and _short_gone and _long_gone
-        if result.success or already_gone:
+        def _leg_done(order) -> bool:
+            return order and (order.status == "filled" or "No open position" in (order.error or ""))
+        fully_closed = _leg_done(result.short_order) and _leg_done(result.long_order)
+        if fully_closed:
             self.tracker.remove_pair(symbol)
-            self._signal_sent_at[symbol] = time.time()  # cooldown after close
-            if already_gone and self.live_ledger:
+            self._signal_sent_at[symbol] = time.time()
+            if not result.success and self.live_ledger:
                 self.live_ledger.note_close(symbol)
         await self.send(format_trade_result(result, action="closed", paper=self.paper_mode, trade=closed_trade))
 

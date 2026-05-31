@@ -147,6 +147,9 @@ class FundingMonitor:
         # 3. Time-based close: random target per position in [4, 5] hours
         if pair.symbol not in self._close_targets:
             target = random.uniform(CLOSE_WINDOW_MIN_HOURS, CLOSE_WINDOW_MAX_HOURS)
+            # If position is already past the target (e.g. after a failed close attempt),
+            # push target 30 min into the future to avoid immediate re-fire
+            target = max(target, pair.age_hours + 0.5)
             self._close_targets[pair.symbol] = target
             log.info(f"{pair.symbol}: close target set to {target:.2f}h")
 
@@ -177,8 +180,11 @@ class FundingMonitor:
 
     async def _trigger_close(self, symbol: str, reason: str):
         self._closing.add(symbol)
-        self._close_targets.pop(symbol, None)  # remove target on close
+        self._close_targets.pop(symbol, None)
         try:
             await self.on_auto_close(symbol, reason)
         finally:
             self._closing.discard(symbol)
+            # If pair is still in tracker (close failed), remove stale target so
+            # the next assignment adds a 30-min buffer (see _check_pair above)
+            self._close_targets.pop(symbol, None)
