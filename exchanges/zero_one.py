@@ -230,6 +230,9 @@ class ZeroOneExchange(ExchangeBase):
     async def _ensure_session(self):
         if self._session_id and self._session_expiry > int(time.time()) + 300:
             return
+        # Session expired or missing — reset stale state so _create_session is called
+        self._session_id = None
+        self._session_priv = None
         if self._account_id is None:
             await self._lookup_account()
         if not self._session_id:
