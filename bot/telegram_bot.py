@@ -67,11 +67,12 @@ class TelegramBot:
         self._paused = False
         self._disabled_exchanges: set[str] = set()
         self._pending: dict[str, Opportunity] = {}
+        self._pending_msg: dict[str, int] = {}  # key → message_id (for "skip all")
         self._signal_sent_at: dict[str, float] = {}  # symbol → unix ts of last signal
         self.app: Optional[Application] = None
 
     async def send(self, text: str, reply_markup=None):
-        await self.app.bot.send_message(
+        return await self.app.bot.send_message(
             chat_id=self.chat_id,
             text=text,
             parse_mode="HTML",
@@ -122,9 +123,13 @@ class TelegramBot:
                 InlineKeyboardButton("✅ Approve", callback_data=f"approve:{key}"),
                 InlineKeyboardButton("⏭ Skip",    callback_data=f"skip:{key}"),
             ],
-            [InlineKeyboardButton("🔍 Details", callback_data=f"details:{key}")],
+            [
+                InlineKeyboardButton("🔍 Details",  callback_data=f"details:{key}"),
+                InlineKeyboardButton("⏭⏭ Skip all", callback_data="skipall"),
+            ],
         ])
-        await self.send(text, reply_markup=keyboard)
+        msg = await self.send(text, reply_markup=keyboard)
+        self._pending_msg[key] = msg.message_id
 
     async def on_position_alert(self, symbol: str, msg: str):
         await self.send(msg)
@@ -174,7 +179,10 @@ class TelegramBot:
             await self._handle_approve(data[8:], query)
         elif data.startswith("skip:"):
             self._pending.pop(data[5:], None)
+            self._pending_msg.pop(data[5:], None)
             await query.edit_message_text("⏭ Skipped.")
+        elif data == "skipall":
+            await self._handle_skipall(query)
         elif data.startswith("details:"):
             opp = self._pending.get(data[8:])
             if opp:
@@ -197,6 +205,24 @@ class TelegramBot:
             else:
                 self._disabled_exchanges.add(name)
             await self._send_exchanges_menu(query.message, edit=True)
+
+    async def _handle_skipall(self, query):
+        self._pending.clear()
+        msg_ids = list(self._pending_msg.values())
+        self._pending_msg.clear()
+        if not msg_ids:
+            try:
+                await query.edit_message_text("⏭ Nothing to skip.")
+            except Exception:
+                pass
+            return
+        for mid in msg_ids:
+            try:
+                await self.app.bot.edit_message_text(
+                    chat_id=self.chat_id, message_id=mid, text="⏭ Skipped (all)."
+                )
+            except Exception:
+                pass  # message may already be edited/too old to touch
 
     async def _handle_approve(self, key: str, query):
         opp = self._pending.get(key)
@@ -231,6 +257,7 @@ class TelegramBot:
             valid, reason = await self._recheck(opp)
             if not valid:
                 self._pending.pop(key, None)
+                self._pending_msg.pop(key, None)
                 await self.send(f"❌ Trade cancelled: {reason}")
                 return
 
@@ -238,6 +265,7 @@ class TelegramBot:
             await self.send(f"🚀 {mode_tag}Opening {opp.symbol}...")
             result = await self.executor.open_pair(opp)
             self._pending.pop(key, None)
+            self._pending_msg.pop(key, None)
 
             if result.success:
                 short_entry = result.short_order.price
@@ -274,6 +302,7 @@ class TelegramBot:
         except Exception as e:
             log.error(f"_handle_approve unhandled exception for {opp.symbol}: {e}", exc_info=True)
             self._pending.pop(key, None)
+            self._pending_msg.pop(key, None)
             await self.send(f"❌ Unexpected error opening {opp.symbol}: {_html.escape(str(e)[:500])}")
 
     async def _recheck(self, opp: Opportunity) -> tuple[bool, str]:
@@ -406,9 +435,13 @@ class TelegramBot:
                     InlineKeyboardButton("✅ Approve", callback_data=f"approve:{key}"),
                     InlineKeyboardButton("⏭ Skip",    callback_data=f"skip:{key}"),
                 ],
-                [InlineKeyboardButton("🔍 Details", callback_data=f"details:{key}")],
+                [
+                    InlineKeyboardButton("🔍 Details",  callback_data=f"details:{key}"),
+                    InlineKeyboardButton("⏭⏭ Skip all", callback_data="skipall"),
+                ],
             ])
-            await update.message.reply_html(text, reply_markup=keyboard)
+            msg = await update.message.reply_html(text, reply_markup=keyboard)
+            self._pending_msg[key] = msg.message_id
 
     async def cmd_balances(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines = ["<b>Balances:</b>"]
