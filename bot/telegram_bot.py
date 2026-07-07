@@ -109,6 +109,19 @@ class TelegramBot:
             counts[pair.long_exchange]  = counts.get(pair.long_exchange, 0) + 1
         return counts
 
+    async def _supersede_old_signal(self, key: str):
+        """If a pending signal for this key already has a live message (e.g. the
+        same pair fired again after cooldown), dismiss the stale one so it can't
+        be orphaned/left un-skippable."""
+        old_mid = self._pending_msg.pop(key, None)
+        if old_mid:
+            try:
+                await self.app.bot.edit_message_text(
+                    chat_id=self.chat_id, message_id=old_mid, text="🔄 Superseded by newer signal."
+                )
+            except Exception:
+                pass
+
     async def on_opportunity(self, opp: Opportunity):
         import time
         if self._paused:
@@ -136,6 +149,7 @@ class TelegramBot:
         self._signal_sent_at[opp.symbol] = time.time()
 
         key = f"{opp.symbol}:{opp.short_exchange}:{opp.long_exchange}"
+        await self._supersede_old_signal(key)
         self._pending[key] = opp
 
         text = format_opportunity(opp, self.margin_usd, self.leverage, paper=self.paper_mode)
@@ -454,6 +468,7 @@ class TelegramBot:
             return
         for opp in opps[:5]:
             key = f"{opp.symbol}:{opp.short_exchange}:{opp.long_exchange}"
+            await self._supersede_old_signal(key)
             self._pending[key] = opp
             text = format_opportunity(opp, self.margin_usd, self.leverage, paper=self.paper_mode)
             keyboard = InlineKeyboardMarkup([
