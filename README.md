@@ -1,12 +1,12 @@
 # Carrypilot
 
-A Telegram bot project for automating operational workflows and user commands.
+CarryPilot funding and carry trading operator bot for monitoring opportunities and managing paper/live carry positions. It tracks balances, opportunities, positions, executor actions, pause/resume state, and runtime statistics.
 
 ## Features
 
-- Telegram bot command handling and operational notifications.
-- Persistent storage for state, logs, or domain data.
-- Containerized deployment support.
+- Scans funding/carry opportunities and reports operator-ready candidates.
+- Provides Telegram controls for balances, opportunities, positions, settings, pause/resume, stats, and close actions.
+- Separates paper/live ledgers and exchange/private-key configuration from Git.
 
 ## Architecture
 
@@ -57,15 +57,15 @@ python main.py
 ## Bot Commands
 
 - `/balances` — Show balances.
-- `/close` — Project-specific command; see the bot implementation for exact behavior.
-- `/closeall` — Project-specific command; see the bot implementation for exact behavior.
-- `/exchanges` — Project-specific command; see the bot implementation for exact behavior.
-- `/log` — Project-specific command; see the bot implementation for exact behavior.
-- `/opportunities` — Project-specific command; see the bot implementation for exact behavior.
+- `/close` — Run the close workflow for this project.
+- `/closeall` — Close all managed positions.
+- `/exchanges` — List configured exchanges.
+- `/log` — Show recent logs.
+- `/opportunities` — Show detected opportunities.
 - `/pause` — Pause automation.
 - `/resume` — Resume automation.
 - `/settings` — Show or change settings.
-- `/skipall` — Project-specific command; see the bot implementation for exact behavior.
+- `/skipall` — Skip all pending opportunities/actions.
 - `/stats` — Show runtime or trading statistics.
 - `/status` — Show current service or strategy status.
 
