@@ -253,6 +253,12 @@ class TradeExecutor:
             )
 
         success = short_result.status == "filled" and long_result.status == "filled"
+        if not success:
+            log.warning(
+                f"Close {symbol} not fully filled: "
+                f"{short_exchange}={short_result.status} ({short_result.error}) | "
+                f"{long_exchange}={long_result.status} ({long_result.error})"
+            )
         return TradeResult(
             success=success, symbol=symbol,
             short_exchange=short_exchange, long_exchange=long_exchange,

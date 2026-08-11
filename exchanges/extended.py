@@ -15,6 +15,9 @@ from .base import ExchangeBase, FundingRate, OrderResult, Position
 from fast_stark_crypto import get_order_msg_hash, sign as stark_sign
 
 BASE_URL = "https://api.starknet.extended.exchange/api/v1"
+# Прежние 10с (GET) / 15с (POST) перестали хватать: см. MARKET_PARAMS ниже.
+# Даже с фильтром рынков держим запас — биржа периодически тормозит.
+HTTP_TIMEOUT = 30
 COLLATERAL_ID = 1           # "0x1"
 COLLATERAL_RESOLUTION = 1_000_000
 TAKER_FEE = Decimal("0.0005")
@@ -71,6 +74,11 @@ SYMBOL_MAP: dict[str, str] = {
 }
 REVERSE_MAP = {v: k for k, v in SYMBOL_MAP.items()}
 
+# /info/markets без фильтра отдаёт все рынки биржи (~840 КБ, 30-36 сек на 2026-08-11)
+# и не укладывался в таймаут. С повторяющимся параметром market=... — только наши
+# рынки: ~123 КБ и ~3.4 сек. Используем везде, где ходим за метаданными рынков.
+MARKET_PARAMS = [("market", m) for m in SYMBOL_MAP.values()]
+
 
 class ExtendedExchange(ExchangeBase):
     name = "extended"
@@ -100,7 +108,7 @@ class ExtendedExchange(ExchangeBase):
         s = await self._sess()
         async with s.get(
             BASE_URL + path, params=params, headers=self._headers(),
-            timeout=aiohttp.ClientTimeout(total=10),
+            timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT),
         ) as r:
             r.raise_for_status()
             return await r.json()
@@ -109,7 +117,7 @@ class ExtendedExchange(ExchangeBase):
         s = await self._sess()
         async with s.post(
             BASE_URL + path, json=json_data, headers=self._headers(),
-            timeout=aiohttp.ClientTimeout(total=15),
+            timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT),
         ) as r:
             r.raise_for_status()
             return await r.json()
@@ -133,7 +141,7 @@ class ExtendedExchange(ExchangeBase):
     async def _ensure_market_cache(self):
         if self._market_cache:
             return
-        data = await self._get("/info/markets")
+        data = await self._get("/info/markets", params=MARKET_PARAMS)
         for m in data.get("data", []):
             name = m.get("name", "")
             internal = REVERSE_MAP.get(name)
@@ -217,7 +225,7 @@ class ExtendedExchange(ExchangeBase):
 
     async def get_all_funding_rates(self) -> list[FundingRate]:
         balance = await self.get_balance()
-        data = await self._get("/info/markets")
+        data = await self._get("/info/markets", params=MARKET_PARAMS)
         results = []
         for m in data.get("data", []):
             name = m.get("name", "")
@@ -403,7 +411,7 @@ class ExtendedExchange(ExchangeBase):
 
     async def ping(self) -> float:
         t0 = time.monotonic()
-        await self._get("/info/markets")
+        await self._get("/info/markets", params=MARKET_PARAMS)
         return (time.monotonic() - t0) * 1000
 
     async def close(self):

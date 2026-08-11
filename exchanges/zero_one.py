@@ -156,7 +156,10 @@ class ZeroOneExchange(ExchangeBase):
             return _parse_receipt(await r.read())
 
     async def _server_ts(self) -> int:
-        return int(await self._get_text("/timestamp"))
+        # /timestamp начал отдавать JSON-строку в кавычках ("1786457237") вместо
+        # голого числа (2026-08-11) — снимаем кавычки, чтобы int() не падал
+        text = await self._get_text("/timestamp")
+        return int(text.strip().strip('"'))
 
     # ── Market info ────────────────────────────────────────────────────────────
 
