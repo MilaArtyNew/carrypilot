@@ -131,8 +131,16 @@ async def main():
             ))
             log.info(f"Restored paper position: {trade.symbol} ({trade.short_exchange}/{trade.long_exchange})")
     else:
-        await tracker.restore_from_exchanges()
+        report = await tracker.restore_from_exchanges()
         if live_ledger:
+            # Phantom "open" records pile up after failed closes — drop them, but only when
+            # every exchange answered, otherwise an API outage would wipe live records
+            if report.scan_complete:
+                live_ledger.reconcile_open(report.live_symbols)
+            else:
+                log.warning(
+                    f"Ledger reconcile skipped — incomplete scan: {', '.join(report.failed_exchanges)}"
+                )
             position_times = live_ledger.get_all_position_times()
             for pair in tracker.get_all():
                 if pair.symbol in position_times:

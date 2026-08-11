@@ -54,6 +54,32 @@ class TradeExecutor:
             return await self._paper_close(symbol, short_exchange, long_exchange)
         return await self._live_close(symbol, short_exchange, long_exchange)
 
+    async def close_leg(self, symbol: str, exchange: str) -> OrderResult:
+        """Close a single naked leg — the leftover when one side of a close failed.
+
+        Live only: paper pairs are simulated, so a half-open pair cannot exist there.
+        """
+        def _failed(error: str) -> OrderResult:
+            return OrderResult(
+                exchange=exchange, symbol=symbol, order_id="",
+                side="", qty=Decimal(0), price=Decimal(0), status="failed", error=error,
+            )
+
+        if self.paper_mode:
+            return _failed("naked legs do not exist in paper mode")
+        ex = self.exchanges.get(exchange)
+        if not ex:
+            return _failed(f"unknown exchange: {exchange}")
+
+        log.info(f"Closing naked leg {symbol} on {exchange}")
+        try:
+            result = await ex.close_position(symbol)
+        except Exception as e:
+            result = _failed(str(e))
+        if result.status != "filled":
+            log.warning(f"Naked leg {symbol}@{exchange} not closed: {result.status} ({result.error})")
+        return result
+
     # ── Paper mode ────────────────────────────────────────────────────────────
 
     async def _paper_open(self, opp: Opportunity) -> TradeResult:

@@ -15,6 +15,24 @@ log = get_logger("position_tracker")
 
 
 @dataclass
+class RestoreReport:
+    """Result of the startup scan — tells the caller whether it is safe to reconcile the ledger."""
+    hedged: list[str] = field(default_factory=list)
+    unhedged: dict[str, dict[str, Position]] = field(default_factory=dict)
+    failed_exchanges: list[str] = field(default_factory=list)
+
+    @property
+    def scan_complete(self) -> bool:
+        """True only if every exchange answered for every symbol. If not, a missing position
+        may be an API failure rather than a real absence — never reconcile on a partial scan."""
+        return not self.failed_exchanges
+
+    @property
+    def live_symbols(self) -> set[str]:
+        return set(self.hedged) | set(self.unhedged)
+
+
+@dataclass
 class PairState:
     symbol: str
     short_exchange: str
@@ -48,6 +66,8 @@ class PositionTracker:
         self._pairs: dict[str, PairState] = {}
         # "symbol:exchange" → consecutive cycle count where API returned None
         self._missing_counts: dict[str, int] = {}
+        # symbol → {exchange → position} for legs found without a hedge on startup
+        self._unhedged: dict[str, dict[str, Position]] = {}
 
     def add_pair(self, state: PairState):
         self._pairs[state.symbol] = state
@@ -62,6 +82,21 @@ class PositionTracker:
 
     def get(self, symbol: str) -> Optional[PairState]:
         return self._pairs.get(symbol)
+
+    def get_unhedged(self) -> dict[str, dict[str, Position]]:
+        """symbol → {exchange → position} for naked legs seen at startup."""
+        return dict(self._unhedged)
+
+    def get_unhedged_leg(self, symbol: str) -> Optional[tuple[str, Position]]:
+        """(exchange, position) of a naked leg, or None. Only meaningful for single-leg leftovers."""
+        legs = self._unhedged.get(symbol)
+        if not legs:
+            return None
+        return next(iter(legs.items()))
+
+    def clear_unhedged(self, symbol: str):
+        if self._unhedged.pop(symbol, None) is not None:
+            log.info(f"Unhedged leg cleared: {symbol}")
 
     async def refresh(self):
         if self.paper_ledger is not None:
@@ -100,8 +135,9 @@ class PositionTracker:
                 # Keep existing positions on refresh failure — don't null them out
                 log.warning(f"Paper refresh {symbol} failed (keeping last state): {e}")
 
-    async def restore_from_exchanges(self):
+    async def restore_from_exchanges(self) -> RestoreReport:
         """On startup: query all exchanges and rebuild tracker from open positions."""
+        report = RestoreReport()
         # symbol → {exchange_name → position}
         by_symbol: dict[str, dict[str, "Position"]] = {}
         for name, ex in self.exchanges.items():
@@ -123,21 +159,29 @@ class PositionTracker:
                     else:
                         from exchanges.kraken import SYMBOL_MAP as KRAKEN_MAP
                         check_syms = list(KRAKEN_MAP.keys())
+                errors = 0
                 for sym in check_syms:
                     try:
                         pos = await ex.get_position(sym)
                         if pos:
                             by_symbol.setdefault(sym, {})[name] = pos
                     except Exception:
-                        pass
+                        errors += 1
+                if errors:
+                    # Partial scan: some symbols never answered, so "no position" is not trustworthy
+                    log.warning(f"Restore: {name} failed on {errors}/{len(check_syms)} symbols")
+                    report.failed_exchanges.append(name)
             except Exception as e:
                 log.warning(f"Restore: error scanning {name}: {e}")
+                report.failed_exchanges.append(name)
 
         for symbol, positions in by_symbol.items():
             shorts = {n: p for n, p in positions.items() if p.side == "short"}
             longs  = {n: p for n, p in positions.items() if p.side == "long"}
             if not shorts or not longs:
                 log.warning(f"Restore: {symbol} has unhedged position — {positions}")
+                self._unhedged[symbol] = positions
+                report.unhedged[symbol] = positions
                 continue
             short_name, short_pos = next(iter(shorts.items()))
             long_name,  long_pos  = next(iter(longs.items()))
@@ -152,7 +196,10 @@ class PositionTracker:
                 long_pos=long_pos,
             )
             self.add_pair(state)
+            report.hedged.append(symbol)
             log.info(f"Restored live position: {symbol} SHORT={short_name} LONG={long_name}")
+
+        return report
 
     async def _refresh_live(self):
         for symbol, pair in list(self._pairs.items()):

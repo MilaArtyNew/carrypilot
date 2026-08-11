@@ -224,6 +224,8 @@ class TelegramBot:
                     f"SHORT price: {opp.short_price}\nLONG price: {opp.long_price}",
                     parse_mode="HTML",
                 )
+        elif data.startswith("closeleg:"):
+            await self._handle_close_leg(data[9:], query)
         elif data.startswith("close:"):
             await self._handle_close(data[6:], query)
         elif data == "closeall:confirm":
@@ -445,19 +447,54 @@ class TelegramBot:
                 self.live_ledger.note_close(symbol)
         await self.send(format_trade_result(result, action="closed", paper=self.paper_mode, trade=closed_trade))
 
+    async def _handle_close_leg(self, symbol: str, query):
+        leg = self.tracker.get_unhedged_leg(symbol)
+        if not leg:
+            await query.edit_message_text(f"❌ No naked leg for {symbol}")
+            return
+        leg_exchange, _ = leg
+        await query.edit_message_text(f"🔄 Closing naked {symbol} leg on {leg_exchange}...")
+        result = await self.executor.close_leg(symbol, leg_exchange)
+
+        done = result.status == "filled" or "No open position" in (result.error or "")
+        if done:
+            self.tracker.clear_unhedged(symbol)
+            if self.live_ledger:
+                # Drop the stale open-time entry so the symbol doesn't carry an old age
+                self.live_ledger.note_close(symbol)
+            price = f" @ {result.price}" if result.status == "filled" else ""
+            await self.send(f"✅ Naked {symbol} leg closed on {leg_exchange}{price}")
+        else:
+            await self.send(
+                f"❌ Failed to close naked {symbol} leg on {leg_exchange}: "
+                f"{_html.escape(str(result.error)[:200])}"
+            )
+
     # ── Commands ──────────────────────────────────────────────────────────────
 
     async def cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         pairs = self.tracker.get_all()
         mode = "📄 PAPER MODE\n\n" if self.paper_mode else ""
-        if not pairs:
+        if not pairs and not self.tracker.get_unhedged():
             await update.message.reply_html(f"{mode}No open positions.")
             return
-        lines = [f"{mode}<b>Open positions:</b>\n"]
+        lines = [f"{mode}<b>Open positions:</b>\n"] if pairs else [mode]
         for p in pairs:
             lines.append(format_position(p))
             lines.append("")
+        lines.extend(self._unhedged_lines())
         await update.message.reply_html("\n".join(lines))
+
+    def _unhedged_lines(self) -> list[str]:
+        """Naked legs are outside the tracker — surface them so they don't sit unnoticed."""
+        unhedged = self.tracker.get_unhedged()
+        if not unhedged:
+            return []
+        lines = ["⚠️ <b>Unhedged legs</b> (close with /close SYMBOL):"]
+        for symbol, legs in unhedged.items():
+            for exchange, pos in legs.items():
+                lines.append(f"{symbol}: {pos.side.upper()} {pos.qty} on {exchange} @ {pos.entry_price}")
+        return lines
 
     async def cmd_opportunities(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔍 Scanning...")
@@ -503,6 +540,20 @@ class TelegramBot:
         symbol = args[0].upper()
         pair = self.tracker.get(symbol)
         if not pair:
+            leg = self.tracker.get_unhedged_leg(symbol)
+            if leg:
+                leg_exchange, leg_pos = leg
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        f"⚠️ Close naked leg on {leg_exchange}", callback_data=f"closeleg:{symbol}",
+                    ),
+                ]])
+                await update.message.reply_text(
+                    f"{symbol} has no pair — only a naked leg left:\n"
+                    f"{leg_pos.side.upper()} {leg_pos.qty} on {leg_exchange} @ {leg_pos.entry_price}",
+                    reply_markup=keyboard,
+                )
+                return
             await update.message.reply_text(f"No open position for {symbol}")
             return
         mode_tag = " [PAPER]" if self.paper_mode else ""
@@ -627,7 +678,9 @@ class TelegramBot:
         mode = "📄 PAPER" if self.paper_mode else "🔴 LIVE"
         await self.app.bot.set_my_commands([
             BotCommand("status",        "Open positions"),
+            BotCommand("close",         "Close one position: /close SYMBOL"),
             BotCommand("closeall",      "Close all positions"),
+            BotCommand("stats",         "PnL and trade stats"),
             BotCommand("exchanges",     "Enable / disable venues"),
             BotCommand("pause",         "Pause scanning"),
             BotCommand("resume",        "Resume scanning"),
@@ -636,7 +689,11 @@ class TelegramBot:
             BotCommand("skipall",       "Skip all pending signals"),
             BotCommand("settings",      "Bot settings"),
         ])
-        await self.send(f"🤖 Bot started [{mode}]\nOld buttons are invalid — wait for new signals.")
+        text = f"🤖 Bot started [{mode}]\nOld buttons are invalid — wait for new signals."
+        unhedged = self._unhedged_lines()
+        if unhedged:
+            text += "\n\n" + "\n".join(unhedged)
+        await self.send(text)
 
     def build(self) -> Application:
         self.app = Application.builder().token(self.token).build()

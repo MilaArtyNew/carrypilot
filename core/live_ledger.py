@@ -142,6 +142,51 @@ class LiveLedger:
         )
         return trade
 
+    def reconcile_open(self, live_symbols: set[str]) -> list[LiveTrade]:
+        """Mark 'open' records with no matching real position as stale_closed.
+
+        Two sources of phantoms: a pair whose close failed (record never closed), and a second
+        record for a symbol that already had an open one — `_open_index` keeps only the newest
+        trade_id per symbol, so the older record could never be closed by `record_close`.
+
+        PnL is left empty: close prices are unknown, so counting these as "closed" would skew
+        stats. Only call with a complete exchange scan — see RestoreReport.scan_complete.
+        """
+        open_by_symbol: dict[str, list[LiveTrade]] = {}
+        for trade in self._trades.values():
+            if trade.status == "open":
+                open_by_symbol.setdefault(trade.symbol, []).append(trade)
+
+        stale: list[LiveTrade] = []
+        for symbol, trades in open_by_symbol.items():
+            trades.sort(key=self._trade_seq)
+            # Keep the newest record only if the symbol really is open on the exchanges
+            keep = trades[-1] if symbol in live_symbols else None
+            for trade in trades:
+                if trade is keep:
+                    continue
+                trade.status = "stale_closed"
+                stale.append(trade)
+
+        if stale:
+            self._open_index = {
+                t.symbol: t.trade_id for t in self._trades.values() if t.status == "open"
+            }
+            self._save()
+            log.warning(
+                f"Reconcile: {len(stale)} phantom open records → stale_closed "
+                f"({', '.join(t.trade_id for t in stale)}); {len(self._open_index)} left open"
+            )
+        return stale
+
+    @staticmethod
+    def _trade_seq(trade: LiveTrade) -> int:
+        """Open time from the trade_id suffix ('BTC-1780553640'); 0 if malformed."""
+        try:
+            return int(trade.trade_id.rsplit("-", 1)[1])
+        except (IndexError, ValueError):
+            return 0
+
     @staticmethod
     def _hours_since(opened_at_str: str) -> float:
         try:
