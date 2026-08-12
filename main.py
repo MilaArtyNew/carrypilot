@@ -68,6 +68,7 @@ async def main():
 
     margin = Decimal(os.getenv("POSITION_MARGIN_USD", "5"))
     leverage = int(os.getenv("LEVERAGE", "2"))
+    margin_buffer = Decimal(os.getenv("MIN_ACCOUNT_HEALTH_BUFFER_USD", "5"))
 
     scanner = OpportunityScanner(
         exchanges=list(exchanges.values()),
@@ -77,12 +78,14 @@ async def main():
         max_bid_ask_spread=Decimal(os.getenv("MAX_BID_ASK_SPREAD", "0.0005")),
         paper_mode=paper_mode,
         margin_usd=margin,
+        margin_buffer_usd=margin_buffer,
     )
 
     executor = TradeExecutor(
         exchanges=exchanges,
         margin_usd=margin,
         leverage=leverage,
+        margin_buffer_usd=margin_buffer,
         paper_ledger=paper_ledger,
     )
     tracker = PositionTracker(exchanges=exchanges, paper_ledger=paper_ledger)
@@ -102,6 +105,7 @@ async def main():
         exchanges=exchanges,
         margin_usd=margin,
         leverage=leverage,
+        margin_buffer_usd=margin_buffer,
         paper_mode=paper_mode,
         live_ledger=live_ledger,
     )
