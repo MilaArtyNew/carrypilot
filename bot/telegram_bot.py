@@ -67,6 +67,7 @@ class TelegramBot:
         exchanges: dict[str, ExchangeBase],
         margin_usd: Decimal,
         leverage: int,
+        margin_buffer_usd: Decimal = Decimal("0"),
         paper_mode: bool = False,
         live_ledger: Optional[LiveLedger] = None,
     ):
@@ -77,6 +78,7 @@ class TelegramBot:
         self.scanner = scanner
         self.exchanges = exchanges
         self.margin_usd = margin_usd
+        self.margin_buffer_usd = margin_buffer_usd
         self.leverage = leverage
         self.paper_mode = paper_mode
         self.live_ledger = live_ledger
@@ -426,7 +428,7 @@ class TelegramBot:
                 reason = _margin_reason(
                     opp.short_exchange, opp.short_balance,
                     opp.long_exchange, opp.long_balance,
-                    self.margin_usd,
+                    self.margin_usd + self.margin_buffer_usd,
                 )
                 if reason:
                     return False, reason
@@ -466,7 +468,7 @@ class TelegramBot:
                     reason = _margin_reason(
                         opp.short_exchange, short_balance,
                         opp.long_exchange, long_balance,
-                        self.margin_usd,
+                        self.margin_usd + self.margin_buffer_usd,
                     )
                     if reason:
                         return False, reason
@@ -737,6 +739,7 @@ class TelegramBot:
             f"<b>Settings:</b>\n"
             f"Mode: <b>{mode}</b>\n"
             f"Margin: ${self.margin_usd}\n"
+            f"Health buffer: ${self.margin_buffer_usd}\n"
             f"Leverage: {self.leverage}x\n"
             f"Position: ${self.margin_usd * self.leverage}\n"
             f"Venues: {', '.join(self.exchanges.keys())}\n"
