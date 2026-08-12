@@ -69,12 +69,51 @@ class TelegramBot:
         self.leverage = leverage
         self.paper_mode = paper_mode
         self.live_ledger = live_ledger
-        self._paused = False
+        self._paused = os.getenv("SIGNALS_PAUSED_ON_START", "false").lower() == "true"
         self._disabled_exchanges: set[str] = set()
         self._pending: dict[str, Opportunity] = {}
         self._pending_msg: dict[str, int] = self._load_pending_msgs()  # key → message_id, persisted (for /skipall)
         self._signal_sent_at: dict[str, float] = {}  # symbol → unix ts of last signal
         self.app: Optional[Application] = None
+
+    def _leg_done(self, order) -> bool:
+        return bool(order and (order.status == "filled" or "No open position" in (order.error or "")))
+
+    def _settle_close_tracking(self, pair: PairState, result: TradeResult) -> str:
+        """Update tracker after a close attempt.
+
+        Fully closed pairs leave the pair tracker. If exactly one leg is done, the
+        remaining leg becomes an explicit unhedged leg so the monitor won't spam
+        pair-level emergency close attempts every cycle.
+        """
+        short_done = self._leg_done(result.short_order)
+        long_done = self._leg_done(result.long_order)
+        if short_done and long_done:
+            self.tracker.remove_pair(pair.symbol)
+            self._signal_sent_at[pair.symbol] = time.time()
+            return "fully_closed"
+        if short_done != long_done:
+            legs = {}
+            if not short_done and pair.short_pos:
+                legs[pair.short_exchange] = pair.short_pos
+            if not long_done and pair.long_pos:
+                legs[pair.long_exchange] = pair.long_pos
+            if legs:
+                self.tracker.set_unhedged(pair.symbol, legs)
+                self._signal_sent_at[pair.symbol] = time.time()
+                return "partial_unhedged"
+        return "still_open"
+
+    async def _notify_partial_unhedged(self, symbol: str):
+        leg = self.tracker.get_unhedged_leg(symbol)
+        if not leg:
+            return
+        leg_exchange, leg_pos = leg
+        await self.send(
+            f"⚠️ <b>{symbol} partially closed</b>\n"
+            f"Remaining naked leg: {leg_pos.side.upper()} {leg_pos.qty} on {leg_exchange}.\n"
+            f"Use /close {symbol} to retry closing this leg."
+        )
 
     async def send(self, text: str, reply_markup=None):
         return await self.app.bot.send_message(
@@ -188,15 +227,12 @@ class TelegramBot:
             )
             self.live_ledger.note_close(symbol)
 
-        def _leg_done(order) -> bool:
-            return order and (order.status == "filled" or "No open position" in (order.error or ""))
-        fully_closed = _leg_done(result.short_order) and _leg_done(result.long_order)
-        if fully_closed:
-            self.tracker.remove_pair(symbol)
-            self._signal_sent_at[symbol] = time.time()
-            if not result.success and self.live_ledger:
-                self.live_ledger.note_close(symbol)
+        state = self._settle_close_tracking(pair, result)
+        if state in {"fully_closed", "partial_unhedged"} and not result.success and self.live_ledger:
+            self.live_ledger.note_close(symbol)
         await self.send(format_trade_result(result, action="closed (auto)", paper=self.paper_mode, trade=closed_trade))
+        if state == "partial_unhedged":
+            await self._notify_partial_unhedged(symbol)
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
@@ -264,6 +300,16 @@ class TelegramBot:
         return len(msg_ids)
 
     async def _handle_approve(self, key: str, query):
+        if self._paused:
+            self._pending.pop(key, None)
+            self._pending_msg.pop(key, None)
+            self._save_pending_msgs()
+            try:
+                await query.edit_message_text("⏸ Signals are paused. This pending signal was cancelled; no order was sent.")
+            except Exception:
+                await self.send("⏸ Signals are paused. Pending approve ignored; no order was sent.")
+            return
+
         opp = self._pending.get(key)
         if not opp:
             parts = key.split(":")
@@ -437,15 +483,12 @@ class TelegramBot:
             )
             self.live_ledger.note_close(symbol)
 
-        def _leg_done(order) -> bool:
-            return order and (order.status == "filled" or "No open position" in (order.error or ""))
-        fully_closed = _leg_done(result.short_order) and _leg_done(result.long_order)
-        if fully_closed:
-            self.tracker.remove_pair(symbol)
-            self._signal_sent_at[symbol] = time.time()
-            if not result.success and self.live_ledger:
-                self.live_ledger.note_close(symbol)
+        state = self._settle_close_tracking(pair, result)
+        if state in {"fully_closed", "partial_unhedged"} and not result.success and self.live_ledger:
+            self.live_ledger.note_close(symbol)
         await self.send(format_trade_result(result, action="closed", paper=self.paper_mode, trade=closed_trade))
+        if state == "partial_unhedged":
+            await self._notify_partial_unhedged(symbol)
 
     async def _handle_close_leg(self, symbol: str, query):
         leg = self.tracker.get_unhedged_leg(symbol)
@@ -593,11 +636,10 @@ class TelegramBot:
         lines = []
         for pair in pairs:
             result = await self.executor.close_pair(pair.symbol, pair.short_exchange, pair.long_exchange)
-            if result.success:
-                self.tracker.remove_pair(pair.symbol)
-                self._signal_sent_at[pair.symbol] = time.time()
+            state = self._settle_close_tracking(pair, result)
+            if state in {"fully_closed", "partial_unhedged"}:
                 if self.live_ledger:
-                    if result.short_order and result.long_order:
+                    if result.success and result.short_order and result.long_order:
                         self.live_ledger.record_close(
                             symbol=pair.symbol,
                             short_close=result.short_order.price,
@@ -605,7 +647,10 @@ class TelegramBot:
                             reason="closeall",
                         )
                     self.live_ledger.note_close(pair.symbol)
-                lines.append(f"✅ {pair.symbol} closed")
+                if state == "fully_closed":
+                    lines.append(f"✅ {pair.symbol} closed")
+                else:
+                    lines.append(f"⚠️ {pair.symbol}: partially closed; naked leg moved to /close {pair.symbol}")
             else:
                 lines.append(f"❌ {pair.symbol}: {result.error or 'error'}")
         await self.send("Close-all result:\n" + "\n".join(lines))
@@ -654,7 +699,9 @@ class TelegramBot:
 
     async def cmd_pause(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         self._paused = True
-        await update.message.reply_text("⏸ Signals paused.")
+        skipped = await self._skip_all_pending()
+        suffix = f" Pending signals cancelled: {skipped}." if skipped else ""
+        await update.message.reply_text(f"⏸ Signals paused.{suffix}")
 
     async def cmd_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         self._paused = False
