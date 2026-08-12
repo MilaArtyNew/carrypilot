@@ -33,10 +33,12 @@ class TradeExecutor:
         exchanges: dict[str, ExchangeBase],
         margin_usd: Decimal,
         leverage: int,
+        margin_buffer_usd: Decimal = Decimal("0"),
         paper_ledger=None,
     ):
         self.exchanges = exchanges
         self.margin_usd = margin_usd
+        self.margin_buffer_usd = margin_buffer_usd
         self.leverage = leverage
         self.paper_ledger = paper_ledger
 
@@ -204,11 +206,12 @@ class TradeExecutor:
             short_ex.get_balance(),
             long_ex.get_balance(),
         )
+        min_required = self.margin_usd + self.margin_buffer_usd
         shortages = []
-        if short_balance < self.margin_usd:
-            shortages.append(f"SHORT {opp.short_exchange} health ${short_balance:.2f} < required ${self.margin_usd:.2f}")
-        if long_balance < self.margin_usd:
-            shortages.append(f"LONG {opp.long_exchange} health ${long_balance:.2f} < required ${self.margin_usd:.2f}")
+        if short_balance < min_required:
+            shortages.append(f"SHORT {opp.short_exchange} health ${short_balance:.2f} < required ${min_required:.2f}")
+        if long_balance < min_required:
+            shortages.append(f"LONG {opp.long_exchange} health ${long_balance:.2f} < required ${min_required:.2f}")
         if shortages:
             return TradeResult(
                 success=False, symbol=opp.symbol,
