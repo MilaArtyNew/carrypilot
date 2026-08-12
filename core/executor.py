@@ -200,6 +200,23 @@ class TradeExecutor:
                 error=f"qty {qty} < min_qty {required_min} for {opp.symbol} — increase margin",
             )
 
+        short_balance, long_balance = await asyncio.gather(
+            short_ex.get_balance(),
+            long_ex.get_balance(),
+        )
+        shortages = []
+        if short_balance < self.margin_usd:
+            shortages.append(f"SHORT {opp.short_exchange} health ${short_balance:.2f} < required ${self.margin_usd:.2f}")
+        if long_balance < self.margin_usd:
+            shortages.append(f"LONG {opp.long_exchange} health ${long_balance:.2f} < required ${self.margin_usd:.2f}")
+        if shortages:
+            return TradeResult(
+                success=False, symbol=opp.symbol,
+                short_exchange=opp.short_exchange, long_exchange=opp.long_exchange,
+                short_order=None, long_order=None, qty=qty,
+                error="Insufficient account health / margin: " + "; ".join(shortages),
+            )
+
         log.info(f"Opening {opp.symbol}: SHORT {opp.short_exchange} / LONG {opp.long_exchange} | qty={qty}")
 
         short_task = short_ex.place_market_order(opp.symbol, "sell", qty)
