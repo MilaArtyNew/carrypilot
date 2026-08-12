@@ -49,6 +49,7 @@ class OpportunityScanner:
         max_bid_ask_spread: Decimal,
         paper_mode: bool = False,
         margin_usd: Decimal = Decimal("0"),
+        margin_buffer_usd: Decimal = Decimal("0"),
     ):
         self.exchanges = {ex.name: ex for ex in exchanges}
         self.min_spread = min_spread
@@ -57,6 +58,7 @@ class OpportunityScanner:
         self.max_ba_spread = max_bid_ask_spread
         self.paper_mode = paper_mode
         self.margin_usd = margin_usd
+        self.margin_buffer_usd = margin_buffer_usd
 
     async def scan(self) -> list[Opportunity]:
         # Fetch all funding rates in parallel
@@ -143,7 +145,7 @@ class OpportunityScanner:
             return None
 
         if not self.paper_mode:
-            min_required = self.margin_usd if self.margin_usd > 0 else Decimal("0")
+            min_required = (self.margin_usd + self.margin_buffer_usd) if self.margin_usd > 0 else Decimal("0")
             if short_fr.available_balance < min_required or long_fr.available_balance < min_required:
                 log.debug(
                     f"{symbol}: insufficient account health/margin "
