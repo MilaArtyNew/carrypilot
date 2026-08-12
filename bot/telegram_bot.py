@@ -45,6 +45,17 @@ def _is_trading_hours() -> bool:
     return TRADING_HOUR_START <= datetime.now(_IL_TZ).hour < TRADING_HOUR_END
 
 
+def _margin_reason(short_exchange: str, short_balance: Decimal, long_exchange: str, long_balance: Decimal, required: Decimal) -> str | None:
+    shortages = []
+    if short_balance < required:
+        shortages.append(f"SHORT {short_exchange} health ${short_balance:.2f} < required ${required:.2f}")
+    if long_balance < required:
+        shortages.append(f"LONG {long_exchange} health ${long_balance:.2f} < required ${required:.2f}")
+    if not shortages:
+        return None
+    return "Insufficient account health / margin: " + "; ".join(shortages)
+
+
 class TelegramBot:
     def __init__(
         self,
@@ -411,8 +422,14 @@ class TelegramBot:
             mins = opp.minutes_to_funding - age_s / 60
             if mins < 15:
                 return False, f"Time to funding left: {mins:.0f} min"
-            if not self.paper_mode and (opp.short_balance <= 0 or opp.long_balance <= 0):
-                return False, "Insufficient balance"
+            if not self.paper_mode:
+                reason = _margin_reason(
+                    opp.short_exchange, opp.short_balance,
+                    opp.long_exchange, opp.long_balance,
+                    self.margin_usd,
+                )
+                if reason:
+                    return False, reason
             if self.tracker.get(opp.symbol):
                 return False, "Position for this symbol is already open"
             return True, ""
@@ -446,8 +463,13 @@ class TelegramBot:
                 if not self.paper_mode:
                     short_balance = await short_ex.get_balance()
                     long_balance = await long_ex.get_balance()
-                    if short_balance <= 0 or long_balance <= 0:
-                        return False, "Insufficient balance"
+                    reason = _margin_reason(
+                        opp.short_exchange, short_balance,
+                        opp.long_exchange, long_balance,
+                        self.margin_usd,
+                    )
+                    if reason:
+                        return False, reason
                 if self.tracker.get(opp.symbol):
                     return False, "Position for this symbol is already open"
                 return True, ""
