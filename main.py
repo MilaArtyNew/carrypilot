@@ -76,6 +76,7 @@ async def main():
         min_minutes_to_funding=float(os.getenv("MIN_MINUTES_TO_FUNDING", "15")),
         max_bid_ask_spread=Decimal(os.getenv("MAX_BID_ASK_SPREAD", "0.0005")),
         paper_mode=paper_mode,
+        margin_usd=margin,
     )
 
     executor = TradeExecutor(
