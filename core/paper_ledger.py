@@ -20,7 +20,7 @@ from utils import get_logger
 
 log = get_logger("paper")
 
-LOG_FILE = Path("/home/gpt/funding-arb-bot/paper_trades.json")
+LOG_FILE = Path(__file__).resolve().parent.parent / "paper_trades.json"
 
 FUNDING_INTERVAL_HOURS = Decimal("8")  # standard 8h funding cycle
 
