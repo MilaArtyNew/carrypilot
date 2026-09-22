@@ -14,6 +14,16 @@ from .base import ExchangeBase, FundingRate, OrderResult, Position
 
 # Only public endpoint available
 STATS_URL = "https://omni-client-api.prod.ap-northeast-1.variational.io/metadata/stats"
+DEFAULT_FUNDING_INTERVAL_SECONDS = 28800
+
+
+def normalize_funding_interval_seconds(value) -> int:
+    """Return a usable interval when Variational reports zero/missing metadata."""
+    try:
+        interval_s = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_FUNDING_INTERVAL_SECONDS
+    return interval_s if interval_s > 0 else DEFAULT_FUNDING_INTERVAL_SECONDS
 
 
 class VariationalExchange(ExchangeBase):
@@ -44,7 +54,7 @@ class VariationalExchange(ExchangeBase):
             # funding_rate is already a decimal fraction (e.g. 0.037347 = 3.73%)
             rate = Decimal(str(item.get("funding_rate", 0)))
 
-            interval_s = int(item.get("funding_interval_s", 28800))
+            interval_s = normalize_funding_interval_seconds(item.get("funding_interval_s", DEFAULT_FUNDING_INTERVAL_SECONDS))
             next_ts = ((now // interval_s) + 1) * interval_s * 1000  # ms
 
             mark = Decimal(str(item.get("mark_price", 0)))
