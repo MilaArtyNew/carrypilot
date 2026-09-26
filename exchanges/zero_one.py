@@ -310,10 +310,17 @@ class ZeroOneExchange(ExchangeBase):
             return Decimal(0)
         try:
             data = await self._get(f"/account/{self._account_id}")
-            balances = data.get("balances", [])
-            # Sum all USDC-equivalent balances
-            return Decimal(str(sum(b.get("amount", 0) for b in balances)))
-        except Exception:
+            # Wallet collateral is NOT free margin: existing positions and open
+            # orders consume initial margin. The account endpoint returns USD
+            # margin numerators; OMF - IMF is capacity for another position.
+            margins = data.get("margins") or {}
+            omf = Decimal(str(margins["omf"]))
+            imf = Decimal(str(margins["imf"]))
+            if not omf.is_finite() or not imf.is_finite():
+                return Decimal(0)
+            return max(Decimal(0), omf - imf)
+        except Exception as e:
+            log.warning("01.xyz free margin unavailable: %s", type(e).__name__)
             return Decimal(0)
 
     async def get_qty_step(self, symbol: str) -> Decimal:

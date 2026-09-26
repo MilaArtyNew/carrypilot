@@ -13,6 +13,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.error import BadRequest
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes,
@@ -48,9 +49,9 @@ def _is_trading_hours() -> bool:
 def _margin_reason(short_exchange: str, short_balance: Decimal, long_exchange: str, long_balance: Decimal, required: Decimal) -> str | None:
     shortages = []
     if short_balance < required:
-        shortages.append(f"SHORT {short_exchange} health ${short_balance:.2f} < required ${required:.2f}")
+        shortages.append(f"SHORT {short_exchange} health ${short_balance:.2f} below required ${required:.2f}")
     if long_balance < required:
-        shortages.append(f"LONG {long_exchange} health ${long_balance:.2f} < required ${required:.2f}")
+        shortages.append(f"LONG {long_exchange} health ${long_balance:.2f} below required ${required:.2f}")
     if not shortages:
         return None
     return "Insufficient account health / margin: " + "; ".join(shortages)
@@ -129,12 +130,22 @@ class TelegramBot:
         )
 
     async def send(self, text: str, reply_markup=None):
-        return await self.app.bot.send_message(
-            chat_id=self.chat_id,
-            text=text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
+        try:
+            return await self.app.bot.send_message(
+                chat_id=self.chat_id,
+                text=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        except BadRequest as e:
+            if "Can't parse entities" not in str(e):
+                raise
+            log.warning("Telegram HTML parse failed; retrying as plain text: %s", e)
+            return await self.app.bot.send_message(
+                chat_id=self.chat_id,
+                text=text,
+                reply_markup=reply_markup,
+            )
 
     @staticmethod
     def _load_pending_msgs() -> dict[str, int]:
@@ -198,6 +209,27 @@ class TelegramBot:
         last = self._signal_sent_at.get(opp.symbol, 0)
         if time.time() - last < SIGNAL_COOLDOWN_SEC:
             return
+        # The scanner's balance snapshot may be stale by the time Telegram
+        # sends this card (or another approval may have consumed margin).
+        if not self.paper_mode:
+            try:
+                short_balance, long_balance = await asyncio.gather(
+                    self.exchanges[opp.short_exchange].get_balance(),
+                    self.exchanges[opp.long_exchange].get_balance(),
+                )
+                reason = _margin_reason(
+                    opp.short_exchange, short_balance,
+                    opp.long_exchange, long_balance,
+                    self.margin_usd + self.margin_buffer_usd,
+                )
+            except Exception as e:
+                log.warning("%s: no approval card — margin read failed: %s", opp.symbol, type(e).__name__)
+                return
+            if reason:
+                log.info("%s: no approval card — %s", opp.symbol, reason)
+                return
+            opp.short_balance = short_balance
+            opp.long_balance = long_balance
         self._signal_sent_at[opp.symbol] = time.time()
 
         key = f"{opp.symbol}:{opp.short_exchange}:{opp.long_exchange}"
